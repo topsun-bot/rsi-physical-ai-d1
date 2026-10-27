@@ -1,0 +1,99 @@
+<mujoco model="unitree_d1_6dof_gripper">
+  <compiler angle="radian" coordinate="local" inertiafromgeom="true"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="RK4"/>
+
+  <default>
+    <joint armature="0.015" damping="0.35" limited="true"/>
+    <geom contype="1" conaffinity="1" condim="4" friction="0.9 0.02 0.002" rgba="0.18 0.20 0.24 1"/>
+    <motor ctrllimited="true"/>
+  </default>
+
+  <asset>
+    <texture name="grid" type="2d" builtin="checker" rgb1=".12 .14 .18" rgb2=".20 .23 .28" width="512" height="512"/>
+    <material name="grid_mat" texture="grid" texrepeat="8 8" reflectance="0.1"/>
+    <material name="unitree_dark" rgba="0.16 0.17 0.20 1" specular="0.6" shininess="0.5"/>
+    <material name="unitree_accent" rgba="0.0 0.68 0.88 1" specular="0.8" shininess="0.7"/>
+    <material name="target_cube_mat" rgba="0.95 0.35 0.15 1"/>
+    <material name="goal_zone_mat" rgba="0.15 0.85 0.45 0.35"/>
+  </asset>
+
+  <worldbody>
+    <light directional="true" diffuse=".8 .8 .8" specular=".2 .2 .2" pos="0 0 2.5" dir="0 0 -1"/>
+    <geom name="table_surface" type="plane" pos="0 0 0" size="1.0 1.0 0.05" material="grid_mat"/>
+
+    <!-- Goal Placement Zone -->
+    <site name="goal_site" pos="0.24 -0.22 0.04" size="0.035 0.035 0.004" type="cylinder" material="goal_zone_mat"/>
+
+    <!-- Target Object to Grasp (0.35kg payload block) -->
+    <body name="target_object" pos="0.32 0.14 0.035">
+      <freejoint name="target_freejoint"/>
+      <geom name="target_geom" type="box" size="0.022 0.022 0.025" mass="0.35" material="target_cube_mat"/>
+      <site name="target_center" pos="0 0 0" size="0.008"/>
+    </body>
+
+    <!-- Unitree D1 Base Link -->
+    <body name="base_link" pos="0 0 0.0">
+      <geom name="base_pedestal" type="cylinder" fromto="0 0 0 0 0 0.055" size="0.065" material="unitree_dark" mass="0.45"/>
+
+      <!-- J0: Base Yaw (-135 deg to +135 deg) -->
+      <body name="link0_yaw" pos="0 0 0.055">
+        <joint name="joint0" type="hinge" axis="0 0 1" range="-2.35619 2.35619" damping="0.45"/>
+        <geom name="geom_link0" type="cylinder" fromto="0 0 0 0 0 0.050" size="0.048" material="unitree_dark" mass="0.48"/>
+
+        <!-- J1: Shoulder Pitch (-90 deg to +90 deg) -->
+        <body name="link1_shoulder" pos="0 0 0.050">
+          <joint name="joint1" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="0.50"/>
+          <geom name="geom_link1" type="capsule" fromto="0 0 0 0.225 0 0" size="0.034" material="unitree_dark" mass="0.52"/>
+
+          <!-- J2: Elbow Pitch (-135 deg to +135 deg) -->
+          <body name="link2_elbow" pos="0.225 0 0">
+            <joint name="joint2" type="hinge" axis="0 1 0" range="-2.35619 2.35619" damping="0.40"/>
+            <geom name="geom_link2" type="capsule" fromto="0 0 0 0.225 0 0" size="0.028" material="unitree_dark" mass="0.42"/>
+
+            <!-- J3: Forearm Roll (-135 deg to +135 deg) -->
+            <body name="link3_forearm" pos="0.225 0 0">
+              <joint name="joint3" type="hinge" axis="1 0 0" range="-2.35619 2.35619" damping="0.25"/>
+              <geom name="geom_link3" type="capsule" fromto="0 0 0 0.145 0 0" size="0.024" material="unitree_accent" mass="0.35"/>
+
+              <!-- J4: Wrist Pitch (-90 deg to +90 deg) -->
+              <body name="link4_wrist_pitch" pos="0.145 0 0">
+                <joint name="joint4" type="hinge" axis="0 1 0" range="-1.5708 1.5708" damping="0.20"/>
+                <geom name="geom_link4" type="cylinder" fromto="0 -0.025 0 0 0.025 0" size="0.022" material="unitree_dark" mass="0.30"/>
+
+                <!-- J5: Wrist Roll (-135 deg to +135 deg) -->
+                <body name="link5_wrist_roll" pos="0 0 0">
+                  <joint name="joint5" type="hinge" axis="1 0 0" range="-2.35619 2.35619" damping="0.15"/>
+                  <geom name="geom_link5" type="capsule" fromto="0 0 0 0.095 0 0" size="0.018" material="unitree_dark" mass="0.18"/>
+
+                  <!-- End-Effector & J6 Parallel Gripper (0 to 65 mm stroke) -->
+                  <body name="ee_gripper_base" pos="0.095 0 0">
+                    <site name="ee_tcp" pos="0.025 0 0" size="0.008" rgba="0 1 1 1"/>
+                    <body name="left_finger" pos="0.02 0.015 0">
+                      <joint name="joint6_left" type="slide" axis="0 1 0" range="0.0 0.0325" damping="0.2"/>
+                      <geom name="left_finger_geom" type="box" size="0.025 0.005 0.012" material="unitree_accent" mass="0.06"/>
+                    </body>
+                    <body name="right_finger" pos="0.02 -0.015 0">
+                      <joint name="joint6_right" type="slide" axis="0 -1 0" range="0.0 0.0325" damping="0.2"/>
+                      <geom name="right_finger_geom" type="box" size="0.025 0.005 0.012" material="unitree_accent" mass="0.06"/>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="act_joint0" joint="joint0" ctrlrange="-8.5 8.5" gear="1"/>
+    <motor name="act_joint1" joint="joint1" ctrlrange="-8.5 8.5" gear="1"/>
+    <motor name="act_joint2" joint="joint2" ctrlrange="-6.0 6.0" gear="1"/>
+    <motor name="act_joint3" joint="joint3" ctrlrange="-4.0 4.0" gear="1"/>
+    <motor name="act_joint4" joint="joint4" ctrlrange="-3.0 3.0" gear="1"/>
+    <motor name="act_joint5" joint="joint5" ctrlrange="-2.0 2.0" gear="1"/>
+    <position name="act_gripper_l" joint="joint6_left" kp="60" ctrlrange="0.0 0.0325"/>
+    <position name="act_gripper_r" joint="joint6_right" kp="60" ctrlrange="0.0 0.0325"/>
+  </actuator>
+</mujoco>

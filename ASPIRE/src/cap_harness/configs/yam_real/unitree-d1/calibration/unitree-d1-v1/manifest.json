@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "bundle_id": "unitree-d1-v1",
+  "station": "unitree-d1",
+  "captured_at": "2026-07-29T16:51:45.758761",
+  "calibration_sha256": "7ece826e37e30d16c84eb4fe9e923ae94de94e19fa4a089d4838605a5f968bf8",
+  "cameras": {
+    "top": {
+      "serial": "rtsp://admin:yyb%401234@10.10.136.7:554/stream2",
+      "resolution": [
+        640,
+        360
+      ],
+      "intrinsics": [
+        [
+          653.8172607421875,
+          0.0,
+          641.8499145507812
+        ],
+        [
+          0.0,
+          652.8601684570312,
+          365.0030822753906
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  "provenance": {
+    "method": "horaud",
+    "translation_rms_mm": 0.7424044368564249,
+    "rotation_rms_deg": 0.34017408063407983,
+    "model_sha256": "0d4a3297ea5f738f2b8cf762eef069b4c6f7d2cff724133082acf74244de0741"
+  }
+}

@@ -1,0 +1,183 @@
+schema_version: 1
+station: unitree-d1
+base_frame: world
+default_arm: right
+arm_aliases:
+  primary: right
+  secondary: left
+calibration:
+  bundle: calibration/unitree-d1-v1
+  manifest_sha256: 727418384a75a637abcd11f45697b364a59ac03c7d3e91b2bb44e7a738677e6a
+motors:
+  bustype: unitree_d1
+  arm_motor_ids:
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
+  - 6
+  arm_motor_types:
+  - '4340'
+  - '4340'
+  - '4340'
+  - '4310'
+  - '4310'
+  - '4310'
+  gripper_motor_id: 7
+  gripper_motor_type: '4310'
+  gripper_sign: 1
+  gripper_velocity_limit: 30.0
+  gripper_torque_limit_nm: 3.75
+  gravity_comp_factor: 1.0
+arms:
+  left:
+    can_interface: d1://10.10.137.102:19001,10.10.137.103:19001
+    host: 127.0.0.1
+    port: 11333
+    joint_names:
+    - left_joint1
+    - left_joint2
+    - left_joint3
+    - left_joint4
+    - left_joint5
+    - left_joint6
+    base_transform:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.2525
+    - - 0.0
+      - 1.0
+      - 0.0
+      - 0.31
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.75
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    home_joints:
+    - 0.0
+    - -1.56
+    - 1.59
+    - 0.0
+    - 0.117
+    - 0.028
+    ready_joints:
+    - 0.0
+    - -0.9
+    - 1.1
+    - 0.0
+    - 0.25
+    - 0.0
+  right:
+    can_interface: d1://10.10.137.101:19001
+    host: 127.0.0.1
+    port: 11334
+    joint_names:
+    - right_joint1
+    - right_joint2
+    - right_joint3
+    - right_joint4
+    - right_joint5
+    - right_joint6
+    base_transform:
+    - - 1.0
+      - 0.0
+      - 0.0
+      - 0.2525
+    - - 0.0
+      - 1.0
+      - 0.0
+      - -0.31
+    - - 0.0
+      - 0.0
+      - 1.0
+      - 0.75
+    - - 0.0
+      - 0.0
+      - 0.0
+      - 1.0
+    home_joints:
+    - -0.066
+    - -1.56
+    - 1.59
+    - 0.0
+    - 0.117
+    - 0.028
+    ready_joints:
+    - 0.0
+    - -0.9
+    - 1.1
+    - 0.0
+    - 0.25
+    - 0.0
+joint_limits:
+  lower:
+  - -2.3562
+  - -1.65
+  - -1.65
+  - -2.3562
+  - -1.65
+  - -2.3562
+  upper:
+  - 2.3562
+  - 1.65
+  - 1.65
+  - 2.3562
+  - 1.65
+  - 2.3562
+planning_workspace:
+  lower:
+  - -0.61
+  - -1.17
+  - -0.11
+  upper:
+  - 1.11
+  - 1.17
+  - 1.61
+model:
+  xml: yam_real/description/station/station_yam_example.xml
+  arm_xml: yam_real/description/arm/yam_4310_linear.xml
+controller:
+  control_frequency_hz: 30.0
+  command_stream_hz: 60.0
+  follower_hold_frequency_hz: 30.0
+  rpc_timeout_s: 0.1
+  close_timeout_s: 2.0
+  final_joint_tolerance_rad: 0.12
+  max_tracking_error_rad: 0.35
+  max_joint_velocity_rad_s: 0.35
+  kp:
+  - 80.0
+  - 80.0
+  - 80.0
+  - 40.0
+  - 10.0
+  - 10.0
+  - 10.0
+  kd:
+  - 5.0
+  - 5.0
+  - 5.0
+  - 1.5
+  - 1.5
+  - 1.5
+  - 0.5
+  gripper_velocity_limit: 2.0
+  gripper_torque_limit_nm: 0.5
+  gripper_full_travel_s: 3.0
+gripper:
+  closed: 0.0
+  open: 1.0
+camera:
+  role: top
+  serial: rtsp://admin:yyb%401234@10.10.136.7:554/stream2
+  resolution:
+  - 640
+  - 360
+  max_acquisition_elapsed_s: 2.0
+aux_cameras: []

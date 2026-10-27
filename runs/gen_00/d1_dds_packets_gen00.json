@@ -1,0 +1,4 @@
+{
+  "status": "BLOCKED_BY_SIM2REAL_GATE",
+  "reason": "Blocked by Sim-to-Real Gate: RMSE=0.0194m (limit=0.015m), GraspSuccess=True, Violations=0"
+}

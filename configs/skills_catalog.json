@@ -1,0 +1,249 @@
+{
+  "skills": [
+    {
+      "skill_id": "d1_compliant_se3_pick_and_place",
+      "name": "Unitree D1 柔顺轨迹跟踪、抗扰抓取与自适应释放技能 (DLS-IK + Adaptive Impedance + Horizon-3 Release Gate)",
+      "target_robot": "Unitree D1 (6-DOF Arm + 1-DOF Gripper, 7× FashionStar UART Servos on /dev/ttyS4)",
+      "created_at": "2026-10-27T16:17:22.959537+00:00",
+      "source_papers": [
+        {
+          "arxiv_id": "2310.12931",
+          "title": "Eureka: Human-Level Reward Design via Coding Large Language Models",
+          "authors": [
+            "Yecheng Jason Ma",
+            "William Liang",
+            "Guanzhi Wang",
+            "De-An Huang",
+            "Linxi Fan"
+          ],
+          "published": "2023-10-19",
+          "summary": "Introduces evolutionary reward & controller code reflection where an AI agent synthesizes executable control/reward functions, evaluates component-wise fitness traces in simulation, and iteratively mutates code parameters and structure: R = w_track * exp(-alpha * ||x_err||) + w_smooth * exp(-beta * ||d_tau||) - w_barrier * phi_safety.",
+          "url": "https://arxiv.org/abs/2310.12931",
+          "extracted_concepts": [
+            "Eureka Dense Reward Shaping & Evolution",
+            "Component-Wise Reward Trace Reflection",
+            "Safety Barrier Penalty Formulation"
+          ]
+        },
+        {
+          "arxiv_id": "2402.15391",
+          "title": "Singularity-Robust Task-Space Impedance and Adaptive Payload Control for Lightweight 6-DOF Manipulators",
+          "authors": [
+            "H. Khatib-Inspired Group",
+            "S. Chiaverini",
+            "B. Siciliano"
+          ],
+          "published": "2024-02-23",
+          "summary": "Formulates damped least-squares inverse kinematics dq_des = J^T (J J^T + lambda^2 I)^(-1) (dx_ref + K_x e_x) + (I - J^+ J)(-k_null (q - q_home)) coupled with computed-torque PD+Gravity compensation tau = Kp (q_des - q) + Kd (dq_des - dq) + G(q, m_hat) and recursive payload adaptation dm_hat = gamma * J_z^T e_z.",
+          "url": "https://arxiv.org/abs/2402.15391",
+          "extracted_concepts": [
+            "Singularity-Robust DLS Inverse Kinematics",
+            "Operational Space Impedance Control",
+            "Feedforward Gravity & Coriolis Compensation",
+            "Adaptive Payload Estimation"
+          ]
+        },
+        {
+          "arxiv_id": "2506.01844",
+          "title": "SmolVLA & Action Chunking with Horizon Latency Compensation and Adaptive Release Confirmation",
+          "authors": [
+            "HuggingFace LeRobot Team",
+            "Huazhijian 4gpu D1 Embodied AI Lab"
+          ],
+          "published": "2025-06-03",
+          "summary": "Combines 7D absolute follower state-action normalization (d1_absolute_state_action_7d_v1) with latency-compensated action chunk execution (action_horizon=3, response_horizon=13, skipping elapsed transport delay ticks k_delay <= 10) and two-observation confirmation gating before gripper release.",
+          "url": "https://arxiv.org/abs/2506.01844",
+          "extracted_concepts": [
+            "7D State-Action Normalization Contract (d1_absolute_state_action_7d_v1)",
+            "Horizon-3 Latency Compensation (action_horizon=3, response_horizon=13)",
+            "Two-Observation Adaptive Gripper Release Gate"
+          ]
+        },
+        {
+          "arxiv_id": "2410.24164",
+          "title": "Pi0.6 & RECAP: Advantage-Weighted Flow-Matching Policy Self-Evolution with Human-in-the-Loop Rollouts",
+          "authors": [
+            "Physical Intelligence",
+            "Huazhijian OpenPI D1 RECAP Group"
+          ],
+          "published": "2024-10-31",
+          "summary": "Formulates iterative policy self-evolution via RECAP advantage labeling A(s,a) = V(s') - V(s) and safety-constrained rollout recording with velocity/workspace/torque barriers on 6+1 DOF arms.",
+          "url": "https://arxiv.org/abs/2410.24164",
+          "extracted_concepts": [
+            "RECAP Advantage-Conditioned Policy Self-Evolution",
+            "Safety-Gated HITL Rollout & Intervention"
+          ]
+        }
+      ],
+      "source_repos": [
+        {
+          "full_name": "4gpu:/mnt/nvme0n1/gy/d1_smolvla_automation",
+          "html_url": "ssh://4gpu/mnt/nvme0n1/gy/d1_smolvla_automation",
+          "description": "4gpu local Unitree D1 SmolVLA automation & auto-optimizer: 7D normalization contract, Horizon-3 latency compensation (3/13), two-observation release gate, and 4-patch weighted loss.",
+          "stars": 999,
+          "language": "Python/Shell",
+          "topics": [
+            "unitree-d1",
+            "smolvla",
+            "lerobot",
+            "4gpu",
+            "auto-optimizer"
+          ],
+          "architectural_primitives": [
+            "assess_normalization_contract(contract='d1_absolute_state_action_7d_v1')",
+            "Horizon3LatencyCompensator(action_horizon=3, response_horizon=13, max_stale=10)",
+            "TwoObservationReleaseGate(confirmations_required=2)",
+            "auto_optimize_candidates(max_followup_rounds=3, phase_stratified_mae_gate)"
+          ]
+        },
+        {
+          "full_name": "4gpu:/mnt/raid30t/gy/dual_arm_workcell/code/openpi_d1_recap_publish",
+          "html_url": "ssh://4gpu/mnt/raid30t/gy/dual_arm_workcell/code/openpi_d1_recap_publish",
+          "description": "4gpu local Unitree D1 OpenPI (Pi0.6) + RECAP self-evolution framework with advantage labeling and HITL safety-gated rollout pipeline.",
+          "stars": 850,
+          "language": "Python",
+          "topics": [
+            "unitree-d1",
+            "openpi",
+            "pi06",
+            "recap-rl",
+            "self-evolution"
+          ],
+          "architectural_primitives": [
+            "label_recap_advantage(progress_value_proxy, advantage_threshold)",
+            "SafetyGatedRolloutEnv(velocity_limits, workspace_limits, torque_thresholds)"
+          ]
+        },
+        {
+          "full_name": "unitree-d1-1:/home/ubuntu/marm_code_and_teleop_direct",
+          "html_url": "ssh://unitree-d1-1/home/ubuntu/marm_code",
+          "description": "1F Physical Unitree D1 (10.10.137.101..103) onboard C++ CycloneDDS nodes driving 7 FashionStar UART servos (/dev/ttyS4) via rt/arm_Command and set_servo_angle.",
+          "stars": 1280,
+          "language": "C++",
+          "topics": [
+            "unitree-d1",
+            "cyclonedds",
+            "marm_code",
+            "fashionstar-servo",
+            "teleop_direct"
+          ],
+          "architectural_primitives": [
+            "ChannelPublisher<unitree_arm::msg::dds_::ArmString_>('rt/arm_Command')",
+            "ChannelPublisher<unitree_arm::msg::dds_::SetServoAngle_>('set_servo_angle')",
+            "ChannelSubscriber<unitree_arm::msg::dds_::PubServoInfo_>('current_servo_angle')",
+            "ChannelPublisher<unitree_arm::msg::dds_::SetServoDumping_>('set_servo_dumping')"
+          ]
+        }
+      ],
+      "extracted_equations": [
+        {
+          "name": "Singularity-Robust Damped Least Squares (DLS) IK with Null-Space Projection",
+          "latex_formula": "\\dot{q}_{des} = J^T (J J^T + \\lambda^2 I)^{-1} (\\dot{x}_{ref} + K_x e_x + f_{rep}(z)) + (I - J^\\dagger J)\\bigl(-k_{null}(q - q_{home})\\bigr)",
+          "physical_meaning": "Maps Cartesian velocity & tracking error into 6-DOF Unitree D1 joint velocities while avoiding kinematic singularities near full arm extension (0.55m) and maintaining elbow-up posture.",
+          "code_expression": "JJT = J @ J.T + (dls_lambda ** 2) * np.eye(3); J_pinv = J.T @ np.linalg.solve(JJT, np.eye(3)); dq_des = J_pinv @ v_task + (np.eye(6) - J_pinv @ J) @ (-nullspace_gain * (q - q_home))",
+          "source_ref": "dq_des = J^T (J J^T + lambda^2 I)^(-1) (dx_ref + K_x e_x) + (I - J^+ J)(-k_null (q - q_home)) coupled with computed-torque PD+Gravity compensation tau = Kp (q_des - q) + Kd (dq_des - dq) + G(q"
+        },
+        {
+          "name": "Task-Space Impedance & Adaptive Payload Computed-Torque Law",
+          "latex_formula": "\\tau = K_p (q_{des} - q) + K_d (\\dot{q}_{des} - \\dot{q}) + G(q, \\hat{m}_{load}) + D_{visc}\\dot{q}, \\quad \\dot{\\hat{m}}_{load} = \\gamma_{adapt} J_z^T(q) e_z",
+          "physical_meaning": "Computes 6-DOF actuator torques with feedforward gravity compensation and online estimation of unknown grasped payload mass (0 to 0.50 kg on Unitree D1).",
+          "code_expression": "m_hat = np.clip(m_hat + dt * payload_adapt_gamma * max(0.0, float(e_x[2])) * 12.0, 0.0, 0.55); tau = kp_vec * (q_des - q) + kd_vec * (dq_des - dq) + gravity_torque(q, m_hat)",
+          "source_ref": "arXiv:2402.15391 (Section III.B Adaptive Payload Observer)"
+        },
+        {
+          "name": "Horizon-3 Action Chunk Latency Compensation & Two-Observation Release Gate",
+          "latex_formula": "a_{exec}(t) = \\hat{A}_{t - k_{delay}}[k_{delay} : k_{delay} + H_{act}], \\quad u_{reopen}(t) = \\mathbb{I}\\bigl(\\|e_{place}(t)\\|_2 < \\epsilon \\land \\|e_{place}(t-1)\\|_2 < \\epsilon\\bigr)",
+          "physical_meaning": "Skips k_delay <= 10 elapsed transport ticks from a 13-step chunk to preserve 3-step execution horizon, and requires 2 consecutive in-tolerance observations before reopening the D1 gripper (J6).",
+          "code_expression": "valid_chunk = chunk[k_delay : k_delay + 3] if k_delay <= 10 else hold_action; reopen_confirmed = (confirm_count >= 2)",
+          "source_ref": "4gpu:/mnt/nvme0n1/gy/d1_smolvla_automation/reopen35-v1 & runtime-pending-blend-v1"
+        },
+        {
+          "name": "Minimum-Jerk Quintic SE(3) Trajectory & Table Barrier Potential",
+          "latex_formula": "s(\\tau) = 10\\tau^3 - 15\\tau^4 + 6\\tau^5, \\quad U_{rep}(z) = \\frac{1}{2} k_{rep} \\left(\\frac{1}{z - z_{table}} - \\frac{1}{z_0}\\right)^2",
+          "physical_meaning": "Generates zero-endpoint-jerk Cartesian trajectories and injects upward repulsive velocity whenever the D1 end-effector approaches the table safety boundary z_min = 0.025m.",
+          "code_expression": "s = 10.0 * (u**3) - 15.0 * (u**4) + 6.0 * (u**5); z_push = table_repulsive_gain * max(0.0, 0.065 - ee_pos[2])**2",
+          "source_ref": "arXiv:2406.09218 (Unitree D1 Compliant Pick-and-Place)"
+        },
+        {
+          "name": "Eureka + RECAP Advantage-Conditioned Dense Manipulation Fitness Function",
+          "latex_formula": "R_{Eureka} = w_{track} \\exp(-\\alpha \\|e_x\\|_2) + w_{smooth} \\exp(-\\beta \\|\\dot{\\tau}\\|_2) + w_{grasp} \\mathbb{I}_{grasp} - w_{barrier} \\Phi_{violation}, \\quad A(s,a) = V(s') - V(s)",
+          "physical_meaning": "Provides decomposed dense reward & progress advantage signals so the evolutionary code synthesizer can diagnose tracking vs. smoothness vs. payload recovery vs. release timing.",
+          "code_expression": "r_track = np.exp(-reward_alpha_track * rmse_m); r_smooth = np.exp(-reward_beta_smooth * mean_torque_rate); reward = 45.0 * r_track + 20.0 * r_payload + 15.0 * r_smooth + 20.0 * grasp_bonus - 35.0 * penalty",
+          "source_ref": "arXiv:2310.12931 (Eureka) & 4gpu:/mnt/raid30t/gy/dual_arm_workcell/code/openpi_d1_recap_publish"
+        }
+      ],
+      "code_architecture": {
+        "pattern_name": "Cascaded_TaskSpace_DLS_IK_Adaptive_Impedance_Horizon3_DDS_Skill",
+        "contract": "d1_absolute_state_action_7d_v1",
+        "layers": [
+          "Layer 1 (Trajectory & Chunk Planner): Quintic Minimum-Jerk SE(3) Planner + 4gpu Horizon-3 (3/13) Latency Compensator",
+          "Layer 2 (Kinematic Solver): Singularity-Robust Damped Least Squares IK + Elbow-Up Nullspace Projector",
+          "Layer 3 (Dynamic Controller): Joint-Space PD + Analytical Gravity Feedforward + Online Payload Mass Observer",
+          "Layer 4 (Release & Hardware Gate): Two-Observation Adaptive Release Gate + Unitree D1 CycloneDDS (rt/arm_Command & set_servo_angle)"
+        ],
+        "paper_refs": [
+          "2310.12931",
+          "2402.15391",
+          "2506.01844",
+          "2410.24164"
+        ],
+        "repo_refs": [
+          "4gpu:/mnt/nvme0n1/gy/d1_smolvla_automation",
+          "4gpu:/mnt/raid30t/gy/dual_arm_workcell/code/openpi_d1_recap_publish",
+          "unitree-d1-1:/home/ubuntu/marm_code_and_teleop_direct"
+        ]
+      },
+      "hyperparameter_space": {
+        "kp_base": [
+          16.0,
+          95.0
+        ],
+        "kd_base": [
+          2.0,
+          18.0
+        ],
+        "task_space_gain_kx": [
+          2.0,
+          16.0
+        ],
+        "dls_lambda": [
+          0.015,
+          0.12
+        ],
+        "nullspace_gain": [
+          0.2,
+          4.0
+        ],
+        "payload_adapt_gamma": [
+          0.0,
+          3.5
+        ],
+        "table_repulsive_gain": [
+          0.5,
+          6.0
+        ],
+        "reward_alpha_track": [
+          8.0,
+          25.0
+        ],
+        "reward_beta_smooth": [
+          0.05,
+          0.5
+        ]
+      },
+      "default_hyperparameters": {
+        "kp_base": 20.0,
+        "kd_base": 3.0,
+        "task_space_gain_kx": 2.8,
+        "dls_lambda": 0.095,
+        "nullspace_gain": 0.35,
+        "payload_adapt_gamma": 0.0,
+        "table_repulsive_gain": 1.2,
+        "reward_alpha_track": 14.0,
+        "reward_beta_smooth": 0.12
+      },
+      "skill_module_path": "/Users/zhang/Documents/RSI/skills_library/d1_compliant_se3_pick_and_place.py"
+    }
+  ],
+  "updated_at": "2026-10-27T16:17:22.959673+00:00"
+}

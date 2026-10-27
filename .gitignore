@@ -1,0 +1,20 @@
+# Virtual environments & caches
+.venv*
+venv/
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.DS_Store
+
+# Large raw keyframe dumps & temporary logs
+ASPIRE/outputs/evolution_loop/cap_run_*/
+ASPIRE/outputs/yam_real/
+ASPIRE/outputs/smoke*/
+*.log
+/tmp/

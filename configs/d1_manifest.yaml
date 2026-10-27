@@ -1,0 +1,194 @@
+# ==============================================================================
+# 物理AI机器人自进化 V1.0 (RSI) — 阶段 1：人类设定规则、技能、约束与工具集
+# Target Platform: Unitree D1 (6-DOF Manipulator + 1-DOF Gripper, 7D Servo State/Action)
+# Grounded in:
+#   - 4gpu (10.10.218.4): /mnt/nvme0n1/gy/{d1_smolvla_automation, d1_act_code, d1_pi06_training}
+#                         /mnt/raid30t/gy/dual_arm_workcell/code/openpi_d1_recap_publish
+#   - 1F Physical Arms  : unitree-d1-1 (10.10.137.101), unitree-d1-2 (10.10.137.102), unitree-d1-3 (10.10.137.103)
+# ==============================================================================
+
+version: "1.0.0"
+project_name: "Physical-AI-RSI-Unitree-D1"
+organization: "桦之坚 (Huazhijian)"
+
+# 1. 目标机器人硬件与集群资产规格 (Unitree D1 6+1 DOF 机械臂 + 4gpu 算力底座)
+robot_spec:
+  model: "Unitree D1 (6-DOF Arm + 1-DOF Gripper, 7× FashionStar UART Servos on /dev/ttyS4)"
+  dof_arm: 6
+  dof_gripper: 1
+  total_actuators: 7
+  state_action_contract: "d1_absolute_state_action_7d_v1"
+  mass_kg: 2.37
+  rated_payload_kg: 0.50
+  max_reach_m: 0.55
+  max_reach_with_gripper_m: 0.67
+  repeatability_mm: 0.05
+  power_supply: "24V DC (2.5A nominal, 5.0A peak)"
+  dds_protocol:
+    middleware: "CycloneDDS (unitree_sdk2 + marm_code + teleop_direct)"
+    command_topic: "rt/arm_Command"
+    feedback_topic: "rt/arm_Feedback"
+    low_level_servo_cmd_topic: "set_servo_angle"
+    low_level_servo_fb_topic: "current_servo_angle"
+    damping_topic: "set_servo_dumping"
+    zero_topic: "arm_zero"
+    msg_types:
+      json_string: "unitree_arm::msg::dds_::ArmString_"
+      servo_cmd: "unitree_arm::msg::dds_::SetServoAngle_"
+      servo_info: "unitree_arm::msg::dds_::PubServoInfo_"
+      servo_damping: "unitree_arm::msg::dds_::SetServoDumping_"
+  cluster_endpoints:
+    training_host:
+      ssh_alias: "4gpu"
+      ip: "10.10.218.4"
+      gpus: "4 × NVIDIA RTX 4090 (48GB)"
+      d1_assets_root: "/mnt/nvme0n1/gy"
+      d1_recap_root: "/mnt/raid30t/gy/dual_arm_workcell/code/openpi_d1_recap_publish"
+      d1_pipelines:
+        smolvla_deploy: "/mnt/nvme0n1/gy/smolvla-deploy"
+        smolvla_automation: "/mnt/nvme0n1/gy/d1_smolvla_automation"
+        act_code: "/mnt/nvme0n1/gy/d1_act_code"
+        act_field_recovery: "/mnt/nvme0n1/gy/d1_act_field_recovery_20260805"
+        pi06_training: "/mnt/nvme0n1/gy/d1_pi06_training"
+    physical_d1_arms:
+      - alias: "unitree-d1-1"
+        ip: "10.10.137.101"
+        proxy_jump: "dgx-spark"
+        onboard_nodes: "/home/ubuntu/marm_code/build/{marm_communication_node,marm_control_node,marm_controller_node}"
+        teleop_node: "/home/ubuntu/teleop_direct/build/teleop_direct_follower"
+      - alias: "unitree-d1-2"
+        ip: "10.10.137.102"
+        proxy_jump: "dgx-spark"
+      - alias: "unitree-d1-3"
+        ip: "10.10.137.103"
+        proxy_jump: "dgx-spark"
+  dh_parameters:
+    links:
+      - name: "joint0_base_yaw"
+        d: 0.105
+        a: 0.0
+        alpha: -1.57079632679
+        mass_kg: 0.48
+      - name: "joint1_shoulder_pitch"
+        d: 0.0
+        a: 0.225
+        alpha: 0.0
+        mass_kg: 0.52
+      - name: "joint2_elbow_pitch"
+        d: 0.0
+        a: 0.225
+        alpha: -1.57079632679
+        mass_kg: 0.42
+      - name: "joint3_forearm_roll"
+        d: 0.145
+        a: 0.0
+        alpha: 1.57079632679
+        mass_kg: 0.35
+      - name: "joint4_wrist_pitch"
+        d: 0.0
+        a: 0.0
+        alpha: -1.57079632679
+        mass_kg: 0.30
+      - name: "joint5_wrist_roll"
+        d: 0.095
+        a: 0.0
+        alpha: 0.0
+        mass_kg: 0.18
+      - name: "joint6_gripper"
+        stroke_mm: [0.0, 65.0]
+        mass_kg: 0.12
+
+# 2. 人类设定的物理安全硬约束 (Hard Constraints & Safety Guardrails)
+safety_constraints:
+  joint_position_limits_deg:
+    joint0: [-135.0, 135.0]
+    joint1: [-90.0, 90.0]
+    joint2: [-135.0, 135.0]
+    joint3: [-135.0, 135.0]
+    joint4: [-90.0, 90.0]
+    joint5: [-135.0, 135.0]
+    joint6_gripper: [0.0, 65.0]
+  max_joint_velocity_rad_s: [2.5, 2.2, 2.5, 3.0, 3.0, 3.5, 1.5]
+  max_joint_torque_nm: [8.5, 8.5, 6.0, 4.0, 3.0, 2.0, 1.5]
+  max_joint_acceleration_rad_s2: 12.0
+  max_cartesian_velocity_m_s: 0.60
+  workspace_bounds_m:
+    x: [-0.55, 0.55]
+    y: [-0.55, 0.55]
+    z: [0.025, 0.68]   # 严禁低于桌面安全高度 z = 2.5 cm 防止撞桌
+  vla_chunk_runtime_contract:
+    action_horizon: 3
+    response_horizon: 13
+    max_stale_frames: 10
+    reopen_confirmations_required: 2
+  code_safety_rules:
+    forbidden_imports: ["os.system", "subprocess", "shutil.rmtree", "socket", "eval", "exec"]
+    require_finite_outputs: true
+    require_torque_saturation: true
+    require_table_collision_guard: true
+  sim_to_real_gate:
+    min_sim_total_score: 78.0
+    max_tracking_rmse_m: 0.015
+    zero_safety_violations: true
+    require_human_approval_for_live_dds: true
+    require_replay_before_live: true
+    default_hardware_mode: "dry_run_dds_replay"  # 默认只生成/回放 DDS 报文，不向 10.10.137.101..103 发运动指令
+
+# 3. 人类设定的进化目标技能集 (Target Evolvable Skills)
+target_skills:
+  - skill_id: "d1_compliant_se3_pick_and_place"
+    name: "Unitree D1 柔顺轨迹跟踪、抗扰抓取与自适应释放技能 (DLS-IK + Adaptive Impedance + Horizon-3 Release Gate)"
+    task_description: >
+      结合 4gpu 上沉淀的 Unitree D1 7D 状态-动作契约 (d1_absolute_state_action_7d_v1)、
+      Horizon-3 延迟补偿与双帧确认释放门控 (Two-Observation Adaptive Release Confirmation)，
+      以及 ArXiv 论文中的奇异鲁棒阻尼最小二乘逆运动学 (DLS-IK) 与操作空间自适应负载阻抗控制，
+      控制 Unitree D1 (6+1 DOF) 机械臂完成高精度接近、0.35kg 负载抗扰抓取、平稳搬运与精准释放。
+    search_queries:
+      arxiv:
+        - "robotic manipulator task space impedance control damped least squares inverse kinematics"
+        - "Eureka reward design reinforcement learning robotic manipulation trajectory tracking"
+        - "vision language action flow matching action chunking manipulation advantage conditioning"
+      github:
+        - "unitree d1 arm control kinematics sdk"
+        - "lerobot smolvla act action chunking manipulation"
+        - "damped least squares inverse kinematics trajectory tracking"
+    evaluation_rubric:
+      ai_weight: 0.65
+      human_weight: 0.35
+      metrics:
+        tracking_accuracy: 0.30          # 末端三维轨迹跟踪精度 (RMSE)
+        grasp_and_payload_stability: 0.25 # 负载扰动恢复、抓取与双帧确认释放精度
+        energy_and_torque_smoothness: 0.20 # 力矩平滑度与指令延迟补偿平滑性
+        safety_margin: 0.15              # 距离桌面、关节极限与力矩上限的安全裕度
+        code_interpretability: 0.10      # 控制律数学可解释性与 7D 契约合规性
+
+# 4. 人类授权的工具集 (Authorized Agent Toolset)
+authorized_tools:
+  literature_and_code_scout:
+    - name: "arxiv_api_search"
+      endpoint: "http://export.arxiv.org/api/query"
+      enabled: true
+      description: "检索 ArXiv 最新机器人控制、Eureka 奖励进化、VLA/ACT 动作分块与 RECAP 优势加权论文"
+    - name: "github_api_search"
+      endpoint: "https://api.github.com/search/repositories"
+      enabled: true
+      description: "检索 GitHub 开源机械臂控制、LeRobot/SmolVLA、Unitree D1 SDK 仓库"
+    - name: "cluster_4gpu_and_d1_asset_inspector"
+      enabled: true
+      description: "只读挂载/解析 4gpu (/mnt/nvme0n1/gy, /mnt/raid30t/gy) 与 unitree-d1-1..3 固件源码契约"
+  code_synthesis_and_verification:
+    - name: "ast_static_safety_analyzer"
+      enabled: true
+      description: "对 AI 生成的控制器代码进行 AST 静态安全审查与 7D 契约签名校验"
+    - name: "d1_physics_simulator"
+      backends: ["mujoco_mjcf", "d1_lagrangian_dynamics"]
+      dt_sec: 0.002
+      control_hz: 500
+      enabled: true
+  real_robot_deployment:
+    - name: "unitree_d1_dds_bridge"
+      modes: ["dry_run_dds_replay", "cyclonedds_live"]
+      command_topic: "rt/arm_Command"
+      low_level_topic: "set_servo_angle"
+      feedback_topic: "rt/arm_Feedback"
+      enabled: true

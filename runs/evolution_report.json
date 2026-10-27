@@ -1,0 +1,223 @@
+{
+  "framework": "物理AI机器人自进化 V1.0 (NVIDIA ASPIRE + Unitree D1 x3 + TP-LINK RTSP)",
+  "camera_stream": "rtsp://admin:yyb%401234@10.10.136.7:554/stream1",
+  "arms": [
+    "10.10.137.101",
+    "10.10.137.102",
+    "10.10.137.103"
+  ],
+  "baseline_image": "iter0_baseline.jpg",
+  "baseline_joints_deg": {
+    "10.10.137.101": [
+      -3.4,
+      -89.8,
+      89.8,
+      0.0,
+      7.2,
+      1.3,
+      0.0
+    ],
+    "10.10.137.102": [
+      0.1,
+      -90.3,
+      88.9,
+      -0.3,
+      3.8,
+      1.1,
+      0.0
+    ],
+    "10.10.137.103": [
+      0.2,
+      -89.4,
+      89.9,
+      0.0,
+      6.8,
+      0.2,
+      0.0
+    ]
+  },
+  "iterations": [
+    {
+      "iteration": 1,
+      "policy_params": {
+        "iteration": 1,
+        "name": "v1_conservative_lift",
+        "yaw_rad": 0.08,
+        "shoulder_rad": -1.28,
+        "elbow_rad": 1.22,
+        "wrist_roll_rad": 0.0,
+        "wrist_pitch_rad": 0.18,
+        "open_grippers": false
+      },
+      "run_dir": "/home/yuyanbu001/RSI/ASPIRE/outputs/evolution_loop/cap_run_iter_1/0001/run-20261027T055355.799024Z-9c0210e3",
+      "peak_image": "iter1_peak.jpg",
+      "sam3_overlays": [
+        "iter1_sam3-000001-top_optical.png",
+        "iter1_sam3-000002-top_optical.png"
+      ],
+      "peak_joints_deg": {
+        "10.10.137.101": [
+          -4.2,
+          -73.6,
+          70.7,
+          0.0,
+          11.3,
+          0.0,
+          0.0
+        ],
+        "10.10.137.102": [
+          4.5,
+          -74.0,
+          72.2,
+          0.1,
+          12.4,
+          0.0,
+          0.0
+        ],
+        "10.10.137.103": [
+          4.4,
+          -74.2,
+          72.2,
+          0.0,
+          12.2,
+          0.0,
+          0.0
+        ]
+      },
+      "mean_joint_tracking_error_deg": 1.2,
+      "visual_evaluation": {
+        "roi_metrics": {
+          "left_d1_103": {
+            "mean_l1_diff": 6.82,
+            "changed_pixel_ratio": 0.0479
+          },
+          "center_d1_102": {
+            "mean_l1_diff": 9.97,
+            "changed_pixel_ratio": 0.11
+          },
+          "right_d1_101": {
+            "mean_l1_diff": 14.63,
+            "changed_pixel_ratio": 0.1406
+          }
+        },
+        "mean_changed_pixel_ratio": 0.0995,
+        "visual_displacement_score": 62.0,
+        "workspace_reach_score": 24.0,
+        "measured_mean_yaw_deg": 4.37,
+        "measured_mean_lift_deg": 15.57,
+        "measured_mean_gripper_deg": 0.0
+      },
+      "kinematic_score": 98.2,
+      "sam3_perception_score": 100.0,
+      "total_score": 78.7,
+      "diagnosis": "Score 78.7 < 90.0: overhead visual displacement (10.0% ROI pixels) is insufficient. Evolving policy -> increasing base yaw (J0), forward reach (J1/J2), and opening grippers."
+    },
+    {
+      "iteration": 2,
+      "policy_params": {
+        "iteration": 2,
+        "name": "v2_moderate_yaw_and_reach",
+        "yaw_rad": 0.22,
+        "shoulder_rad": -1.05,
+        "elbow_rad": 0.88,
+        "wrist_roll_rad": 0.15,
+        "wrist_pitch_rad": 0.28,
+        "open_grippers": true
+      },
+      "run_dir": "/home/yuyanbu001/RSI/ASPIRE/outputs/evolution_loop/cap_run_iter_2/0001/run-20261027T055510.902293Z-b91d60c0",
+      "peak_image": "iter2_peak.jpg",
+      "sam3_overlays": [
+        "iter2_sam3-000001-top_optical.png",
+        "iter2_sam3-000002-top_optical.png"
+      ],
+      "peak_joints_deg": {
+        "10.10.137.101": [
+          -12.5,
+          -60.5,
+          51.4,
+          -8.2,
+          17.1,
+          0.0,
+          49.8
+        ],
+        "10.10.137.102": [
+          12.6,
+          -60.3,
+          55.7,
+          8.9,
+          18.6,
+          0.0,
+          49.8
+        ],
+        "10.10.137.103": [
+          12.4,
+          -60.4,
+          55.6,
+          9.0,
+          18.6,
+          0.1,
+          0.0
+        ]
+      },
+      "mean_joint_tracking_error_deg": 2.03,
+      "visual_evaluation": {
+        "roi_metrics": {
+          "left_d1_103": {
+            "mean_l1_diff": 9.04,
+            "changed_pixel_ratio": 0.0783
+          },
+          "center_d1_102": {
+            "mean_l1_diff": 12.28,
+            "changed_pixel_ratio": 0.1426
+          },
+          "right_d1_101": {
+            "mean_l1_diff": 17.94,
+            "changed_pixel_ratio": 0.1741
+          }
+        },
+        "mean_changed_pixel_ratio": 0.1317,
+        "visual_displacement_score": 89.8,
+        "workspace_reach_score": 79.6,
+        "measured_mean_yaw_deg": 12.5,
+        "measured_mean_lift_deg": 29.1,
+        "measured_mean_gripper_deg": 33.2
+      },
+      "kinematic_score": 97.0,
+      "sam3_perception_score": 100.0,
+      "total_score": 93.6,
+      "diagnosis": "Score 93.6 >= 90.0 PASS! All 3 Unitree D1 arms demonstrated synchronized overhead swing, forward extension, and wide gripper opening."
+    }
+  ],
+  "final_home_image": "iter_final_home.jpg",
+  "final_joints_deg": {
+    "10.10.137.101": [
+      -2.8,
+      -89.5,
+      89.8,
+      0.0,
+      7.4,
+      0.2,
+      0.1
+    ],
+    "10.10.137.102": [
+      0.4,
+      -90.3,
+      88.0,
+      0.1,
+      3.7,
+      0.1,
+      0.2
+    ],
+    "10.10.137.103": [
+      0.4,
+      -89.5,
+      88.5,
+      0.1,
+      4.8,
+      0.0,
+      0.0
+    ]
+  },
+  "converged": true,
+  "final_score": 93.6
+}
