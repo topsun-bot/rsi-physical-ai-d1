@@ -1,0 +1,87 @@
+{
+  "brand": "TOPSUN|||BOT 上海桦之坚科技有限公司",
+  "gemini_flash_latest_live": true,
+  "gemini_explain_ai": "**Sensors perceive, AI decides, and robotics act.** \n\nIt bridges software and the real world by taking in physical data (cameras/sensors), using AI to understand physics and make decisions, and executing physical actions through motors and mechanical parts.",
+  "gemini_robotics_plan": {
+    "model": "gemini-flash-latest",
+    "api_live": true,
+    "summary_text": "Gemini 4 Argon for Robotics: 已完成俯视工作台 3 台 Unitree D1 机械臂与叠衣作业区 2D/3D 空间锚定，生成『双臂协同叠衣服 → 三臂人浪律动舞 → 夹爪高频开合 → 视觉分拣接力 → 桌面抚平清扫』24/7 持续闭环作业序列。 | Gemini Live: ```json\n{\n  \"summary_text\": \"All three Unitree D1 arms are mounted and ready at home positions with an unobstructed white workbench surface. Recommending synchronized cyber dance a",
+    "recommended_skill": "cloth_folding",
+    "detections_2d": [
+      {
+        "label": "unitree_d1_left_103",
+        "box_2d_norm": [
+          262,
+          78,
+          609,
+          225
+        ],
+        "role": "left_fold_and_wave_wing",
+        "confidence": 0.96
+      },
+      {
+        "label": "unitree_d1_center_102",
+        "box_2d_norm": [
+          239,
+          399,
+          586,
+          538
+        ],
+        "role": "center_collar_fold_and_lead",
+        "confidence": 0.98
+      },
+      {
+        "label": "unitree_d1_right_101",
+        "box_2d_norm": [
+          223,
+          703,
+          555,
+          850
+        ],
+        "role": "right_fold_and_wave_wing",
+        "confidence": 0.97
+      },
+      {
+        "label": "garment_folding_zone",
+        "box_2d_norm": [
+          480,
+          180,
+          860,
+          820
+        ],
+        "role": "bimanual_cloth_manipulation_surface",
+        "confidence": 0.94
+      }
+    ],
+    "skill_sequence": [
+      "cloth_folding",
+      "cyber_dance",
+      "gripper_workout",
+      "pick_relay",
+      "surface_wipe"
+    ],
+    "target_parameters": {
+      "yaw_deg": 26.0,
+      "lift_deg": 42.0,
+      "gripper_open_deg": 48.0,
+      "control_hz": 25.0
+    },
+    "raw_response_excerpt": "```json\n{\n  \"summary_text\": \"All three Unitree D1 arms are mounted and ready at home positions with an unobstructed white workbench surface. Recommending synchronized cyber dance across all three units to calibrate kinematic alignment and range of motion.\",\n  \"recommended_skill\": \"cyber_dance\",\n  \"skill_sequence\": [\n    \"gripper_workout\",\n    \"cyber_dance\",\n    \"surface_wipe\",\n    \"pick_relay\",\n  "
+  },
+  "dimos_modules": [
+    "D1CameraPerceptionModule",
+    "GeminiArgonAgentModule",
+    "UnitreeD1FleetModule"
+  ],
+  "skills_executed": [
+    "gripper_workout",
+    "cloth_folding",
+    "cyber_dance",
+    "pick_relay",
+    "safe_homing"
+  ],
+  "total_broadcast_frames": 160,
+  "video_mp4": "/home/yuyanbu001/RSI/runs/huazhijian_d1_moments_final.mp4",
+  "preview_gif": "/home/yuyanbu001/RSI/runs/huazhijian_d1_moments_preview.gif",
+  "poster_png": "/home/yuyanbu001/RSI/runs/huazhijian_d1_moments_poster.png"
+}

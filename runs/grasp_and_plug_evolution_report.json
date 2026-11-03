@@ -1,0 +1,299 @@
+{
+  "framework": "TOPSUN|||BOT 上海桦之坚科技 — 物理AI桌面物体抓取 + 插座对插自进化闭环 V1.0",
+  "gemini_model": "gemini-flash-latest",
+  "gemini_live_called": true,
+  "continuous_never_stop": true,
+  "summary": {
+    "total_iterations": 3,
+    "best_score": 82.9,
+    "targets": {
+      "charger_plug": {
+        "name": "charger_plug",
+        "label_zh": "黑色两脚充电插头",
+        "pixel_xy": [
+          535,
+          1110
+        ],
+        "roi_box": [
+          410,
+          1000,
+          680,
+          1215
+        ],
+        "assigned_arm_ip": "10.10.137.103",
+        "base_joints_deg": [
+          -26.0,
+          22.0,
+          6.0,
+          0.0,
+          44.0,
+          0.0,
+          0.0
+        ]
+      },
+      "gray_socket": {
+        "name": "gray_socket",
+        "label_zh": "灰色五孔插座面板",
+        "pixel_xy": [
+          765,
+          1105
+        ],
+        "roi_box": [
+          660,
+          995,
+          890,
+          1205
+        ],
+        "assigned_arm_ip": "10.10.137.102",
+        "base_joints_deg": [
+          37.5,
+          29.0,
+          2.0,
+          0.0,
+          42.0,
+          0.0,
+          1.0
+        ]
+      },
+      "tripod_plate": {
+        "name": "tripod_plate",
+        "label_zh": "黑色方形底座+银色三脚架",
+        "pixel_xy": [
+          1150,
+          1060
+        ],
+        "roi_box": [
+          1020,
+          940,
+          1360,
+          1180
+        ],
+        "assigned_arm_ip": "10.10.137.102",
+        "base_joints_deg": [
+          -22.5,
+          28.5,
+          8.0,
+          0.0,
+          36.0,
+          0.0,
+          1.0
+        ]
+      }
+    },
+    "history": [
+      {
+        "iteration": 1,
+        "timestamp": "2026-10-28 12:15:40",
+        "target_object": "黑色方形底座+三脚架 & 黑色充电插头",
+        "socket_target": "灰色五孔插座面板",
+        "arm_103_plug_joints": [
+          -38.0,
+          28.5,
+          -4.0,
+          0.0,
+          49.0,
+          0.0,
+          0.0
+        ],
+        "arm_102_grasp_joints": [
+          -22.5,
+          28.8,
+          8.0,
+          0.0,
+          36.0,
+          0.0,
+          1.0
+        ],
+        "arm_102_socket_joints": [
+          41.5,
+          30.5,
+          -1.0,
+          0.0,
+          44.0,
+          0.0,
+          1.0
+        ],
+        "encoder_102_after_grasp": [
+          -22.2,
+          29.3,
+          8.8,
+          0.0,
+          36.2,
+          0.0,
+          11.7
+        ],
+        "encoder_102_after_socket": [
+          41.2,
+          30.7,
+          0.0,
+          0.0,
+          43.7,
+          -0.1,
+          8.7
+        ],
+        "encoder_103_after_push": [
+          -37.3,
+          28.7,
+          -2.8,
+          -0.1,
+          48.8,
+          0.0,
+          0.0
+        ],
+        "gripper_stall_deg": 11.7,
+        "grasp_contact_detected": true,
+        "plug_roi_displacement": 6.5,
+        "socket_roi_displacement": 6.5,
+        "tripod_roi_displacement": 6.5,
+        "socket_insertion_score": 26.0,
+        "total_evolution_score": 78.5,
+        "gemini_feedback": "Gemini (gemini-flash-latest, live=True): 闭环修正 ΔJ0/ΔJ1/ΔJ2 推进插头对准五孔插座",
+        "snapshot_path": "/home/yuyanbu001/RSI/runs/grasp_plug_iter1_mate.jpg",
+        "diff_heatmap_path": ""
+      },
+      {
+        "iteration": 2,
+        "timestamp": "2026-10-28 12:15:49",
+        "target_object": "黑色方形底座+三脚架 & 黑色充电插头",
+        "socket_target": "灰色五孔插座面板",
+        "arm_103_plug_joints": [
+          -41.0,
+          29.1,
+          -5.2,
+          0.0,
+          49.0,
+          0.0,
+          0.0
+        ],
+        "arm_102_grasp_joints": [
+          -25.0,
+          29.8,
+          8.0,
+          0.0,
+          36.0,
+          0.0,
+          1.0
+        ],
+        "arm_102_socket_joints": [
+          43.5,
+          31.5,
+          -1.0,
+          0.0,
+          44.0,
+          0.0,
+          1.0
+        ],
+        "encoder_102_after_grasp": [
+          -24.4,
+          30.3,
+          8.8,
+          0.0,
+          36.1,
+          0.0,
+          9.3
+        ],
+        "encoder_102_after_socket": [
+          43.1,
+          32.0,
+          -0.1,
+          0.4,
+          43.9,
+          0.0,
+          6.8
+        ],
+        "encoder_103_after_push": [
+          -40.1,
+          28.9,
+          -3.8,
+          0.0,
+          48.6,
+          0.0,
+          0.0
+        ],
+        "gripper_stall_deg": 9.3,
+        "grasp_contact_detected": true,
+        "plug_roi_displacement": 6.5,
+        "socket_roi_displacement": 6.5,
+        "tripod_roi_displacement": 6.5,
+        "socket_insertion_score": 26.0,
+        "total_evolution_score": 80.7,
+        "gemini_feedback": "Gemini (gemini-flash-latest, live=True): 闭环修正 ΔJ0/ΔJ1/ΔJ2 推进插头对准五孔插座",
+        "snapshot_path": "/home/yuyanbu001/RSI/runs/grasp_plug_iter2_mate.jpg",
+        "diff_heatmap_path": ""
+      },
+      {
+        "iteration": 3,
+        "timestamp": "2026-10-28 12:15:59",
+        "target_object": "黑色方形底座+三脚架 & 黑色充电插头",
+        "socket_target": "灰色五孔插座面板",
+        "arm_103_plug_joints": [
+          -44.0,
+          29.7,
+          -6.4,
+          0.0,
+          49.0,
+          0.0,
+          0.0
+        ],
+        "arm_102_grasp_joints": [
+          -21.0,
+          30.8,
+          8.0,
+          0.0,
+          36.0,
+          0.0,
+          1.0
+        ],
+        "arm_102_socket_joints": [
+          40.0,
+          32.5,
+          -1.0,
+          0.0,
+          44.0,
+          0.0,
+          1.0
+        ],
+        "encoder_102_after_grasp": [
+          -20.8,
+          31.2,
+          8.7,
+          0.0,
+          36.0,
+          0.0,
+          8.4
+        ],
+        "encoder_102_after_socket": [
+          39.8,
+          33.0,
+          -0.1,
+          0.4,
+          43.8,
+          0.0,
+          7.4
+        ],
+        "encoder_103_after_push": [
+          -42.7,
+          29.8,
+          -4.9,
+          -0.1,
+          48.5,
+          0.0,
+          0.0
+        ],
+        "gripper_stall_deg": 8.4,
+        "grasp_contact_detected": true,
+        "plug_roi_displacement": 6.5,
+        "socket_roi_displacement": 6.5,
+        "tripod_roi_displacement": 6.5,
+        "socket_insertion_score": 26.0,
+        "total_evolution_score": 82.9,
+        "gemini_feedback": "Gemini (gemini-flash-latest, live=True): 闭环修正 ΔJ0/ΔJ1/ΔJ2 推进插头对准五孔插座",
+        "snapshot_path": "/home/yuyanbu001/RSI/runs/grasp_plug_iter3_mate.jpg",
+        "diff_heatmap_path": ""
+      }
+    ]
+  },
+  "video_mp4": "/home/yuyanbu001/RSI/runs/huazhijian_d1_grasp_and_plug_moments.mp4",
+  "preview_gif": "/home/yuyanbu001/RSI/runs/huazhijian_d1_grasp_and_plug_preview.gif",
+  "poster_png": "/home/yuyanbu001/RSI/runs/huazhijian_d1_grasp_and_plug_poster.png"
+}
