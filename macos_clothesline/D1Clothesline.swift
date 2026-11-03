@@ -1,12 +1,8 @@
-// 顶部灵动岛实时视频晾衣绳浮窗
-
 import Cocoa
 import Carbon
 import ImageIO
 import Darwin
 import AVFoundation
-
-// MARK: - 路径与偏好配置
 
 enum Paths {
     static let repoRoot = URL(fileURLWithPath: "/Users/zhang/Documents/RSI")
@@ -15,8 +11,6 @@ enum Paths {
     static let insta360Dir = repoRoot.appendingPathComponent("runs/insta360_multiview")
     static let pythonBin = repoRoot.appendingPathComponent(".venv/bin/python")
 }
-
-// MARK: - 链路日志与文件写入
 
 enum TraceLogger {
     static func makeOperationId(prefix: String = "cl") -> String {
@@ -68,8 +62,6 @@ enum FileIO {
         }
     }
 }
-
-// MARK: - 遥测与场景图解析
 
 struct HubStatusPayload: Decodable {
     let continuous_mode: Bool?
@@ -199,8 +191,6 @@ enum Settings {
     static let maxShots = 6
 }
 
-// MARK: - 视频流与截图卡片配置
-
 struct FeedSpec {
     let id: String
     let title: String
@@ -270,8 +260,6 @@ func cropImage(_ sourceImage: CGImage, _ normalizedCrop: CGRect?) -> CGImage {
     ).integral
     return sourceImage.cropping(to: cropRect) ?? sourceImage
 }
-
-// MARK: - 系统截图目录接管与恢复
 
 /// 暂存并重定向系统截图目录以便退出恢复
 enum ScreenshotInbox {
@@ -462,8 +450,6 @@ func shotSpec(_ url: URL, thumb: CGImage) -> FeedSpec {
                     fileURL: url, fixedAspect: aspect, isRecording: recording)
 }
 
-// MARK: - 实时视频帧拉取管道
-
 private func loadLocalStreamConfig(_ key: String, fallback: String) -> String {
     if let envValue = ProcessInfo.processInfo.environment[key], !envValue.isEmpty { return envValue }
     let cfgFile = FileManager.default.homeDirectoryForCurrentUser
@@ -638,17 +624,15 @@ final class FrameHub {
             guard let jpg = latest else { continue }
             lock.lock(); _lastFrameAt = Date(); let want = _needsFrames; lock.unlock()
             guard want,
-                  let src = CGImageSourceCreateWithData(jpg as CFData, nil),
+                  let imageSource = CGImageSourceCreateWithData(jpg as CFData, nil),
                   let img = CGImageSourceCreateImageAtIndex(
-                      src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { continue }
+                      imageSource, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else { continue }
             DispatchQueue.main.async { [weak self] in self?.onFrame?(img) }
         }
         if proc.isRunning { proc.terminate() }
         lock.lock(); if process === proc { process = nil }; lock.unlock()
     }
 }
-
-// MARK: - 机械臂遥测与中枢状态
 
 final class Telemetry {
     struct Hub {
@@ -697,9 +681,9 @@ final class Telemetry {
     }
 
     private func loop() {
-        let cfg = URLSessionConfiguration.ephemeral
-        cfg.timeoutIntervalForRequest = 0.8
-        let session = URLSession(configuration: cfg)
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        sessionConfig.timeoutIntervalForRequest = 0.8
+        let session = URLSession(configuration: sessionConfig)
         defer { session.finishTasksAndInvalidate() }
         let statusURL = URL(string: "\(hubURL)/api/status")
         let decoder = JSONDecoder()
@@ -773,8 +757,6 @@ final class Telemetry {
         return vals
     }
 }
-
-// MARK: - 全景与针孔反投影桥接
 
 final class Insta360Hub {
     private let lock = NSLock()
@@ -940,8 +922,6 @@ final class Insta360Hub {
 }
 
 
-// MARK: - 绳索与卡片几何布局
-
 enum Layout {
     static var scale: CGFloat { Settings.sizeScale }
     static var photoHeight: CGFloat { (128 * scale).rounded() }
@@ -955,7 +935,6 @@ enum Layout {
     /// 模拟悬链线自然下垂弧度
     static func sag(_ width: CGFloat) -> CGFloat { min(30, width * 0.018) }
 
-    /// 计算横坐标处绳索下垂深度
     static func ropeDepth(atX horizontalX: CGFloat, width: CGFloat) -> CGFloat {
         guard width > 0 else { return ropeTop }
         let normalizedRatio = horizontalX / width
@@ -967,8 +946,6 @@ private let noImplicit: [String: CAAction] = [
     "contents": NSNull(), "string": NSNull(), "bounds": NSNull(), "position": NSNull(),
     "frame": NSNull(), "hidden": NSNull(), "foregroundColor": NSNull(), "backgroundColor": NSNull(),
 ]
-
-// MARK: - 挂绳视频与截图卡片
 
 final class Card {
     let spec: FeedSpec
@@ -1175,10 +1152,10 @@ final class Card {
         nudge(CGFloat.random(in: 10...14) * (Bool.random() ? 1 : -1), delay: 0.1)
     }
 
-    func setHovered(_ on: Bool) {
-        guard on != hovered else { return }
-        hovered = on
-        holder.zPosition = on ? 100 : 0
+    func setHovered(_ isHovered: Bool) {
+        guard isHovered != hovered else { return }
+        hovered = isHovered
+        holder.zPosition = isHovered ? 100 : 0
         applyTransform(animated: true)
     }
 
@@ -1199,14 +1176,14 @@ final class Card {
     /// 模拟轻推阻尼摆动增强物理反馈
     func nudge(_ degrees: CGFloat, delay: CFTimeInterval = 0) {
         let rad = degrees * .pi / 180
-        let t0 = CACurrentMediaTime() + delay
+        let startTime = CACurrentMediaTime() + delay
         let push = CABasicAnimation(keyPath: "transform.rotation.z")
         push.fromValue = 0
         push.toValue = rad
         push.duration = 0.28
         push.isAdditive = true
         push.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        push.beginTime = t0
+        push.beginTime = startTime
         let spring = CASpringAnimation(keyPath: "transform.rotation.z")
         spring.fromValue = rad
         spring.toValue = 0
@@ -1215,7 +1192,7 @@ final class Card {
         spring.damping = 2.6
         spring.duration = spring.settlingDuration
         spring.isAdditive = true
-        spring.beginTime = t0 + 0.28
+        spring.beginTime = startTime + 0.28
         holder.add(push, forKey: "swingPush")
         holder.add(spring, forKey: "swing")
     }
@@ -1243,8 +1220,6 @@ final class Card {
         CATransaction.commit()
     }
 }
-
-// MARK: - 顶部与灵动岛几何判定
 
 struct TopHoverGeometry {
     struct ScreenMetrics {
@@ -1304,7 +1279,7 @@ struct TopHoverGeometry {
         return max(menuGap, screenMetrics.safeAreaTop, screenMetrics.statusBarThickness, 24.0)
     }
 
-    /// 计算或回退屏幕顶部中央刘海区域
+    /// 无刘海硬件时回退顶栏中央区域
     static func notchRect(for screenMetrics: ScreenMetrics) -> NSRect {
         let barHeight = topBarHeight(for: screenMetrics)
         if let left = screenMetrics.auxiliaryTopLeftArea,
@@ -1499,8 +1474,6 @@ struct ClotheslineHoverController {
         return .none
     }
 }
-
-// MARK: - 顶栏下方悬浮晾衣绳面板
 
 final class LinePanel: NSPanel {
     init(content: NSView) {
@@ -1700,8 +1673,8 @@ final class ClotheslineView: NSView, NSDraggingSource {
     }
 
     /// 整体平滑下放或收起回顶栏内部
-    func setRevealed(_ on: Bool, animated: Bool) {
-        let target = on ? CATransform3DIdentity : CATransform3DMakeTranslation(0, bounds.height, 0)
+    func setRevealed(_ isRevealed: Bool, animated: Bool) {
+        let target = isRevealed ? CATransform3DIdentity : CATransform3DMakeTranslation(0, bounds.height, 0)
         let from = container.presentation()?.transform ?? container.transform
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -1711,13 +1684,13 @@ final class ClotheslineView: NSView, NSDraggingSource {
             let slideAnim = CABasicAnimation(keyPath: "transform")
             slideAnim.fromValue = NSValue(caTransform3D: from)
             slideAnim.toValue = NSValue(caTransform3D: target)
-            slideAnim.duration = on ? 0.46 : 0.26
-            slideAnim.timingFunction = on
+            slideAnim.duration = isRevealed ? 0.46 : 0.26
+            slideAnim.timingFunction = isRevealed
                 ? CAMediaTimingFunction(controlPoints: 0.22, 1.28, 0.42, 1)
                 : CAMediaTimingFunction(name: .easeIn)
             container.add(slideAnim, forKey: "slide")
         }
-        if on {
+        if isRevealed {
             for (cardIndex, card) in cards.enumerated() {
                 card.nudge(
                     CGFloat.random(in: 5...9) * (Bool.random() ? 1 : -1),
@@ -1757,8 +1730,6 @@ final class ClotheslineView: NSView, NSDraggingSource {
         guard let window else { return .zero }
         return window.convertToScreen(convert(card.holder.frame, to: nil))
     }
-
-    // MARK: - 鼠标交互
 
     override func mouseDown(with event: NSEvent) {
         downIndex = cardIndex(at: convert(event.locationInWindow, from: nil))
@@ -1817,8 +1788,6 @@ final class ClotheslineView: NSView, NSDraggingSource {
         isShowingMenu = false
     }
 
-    // MARK: - 拖拽导出代理
-
     func draggingSession(_ session: NSDraggingSession,
                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .outsideApplication ? [.copy] : []
@@ -1830,8 +1799,6 @@ final class ClotheslineView: NSView, NSDraggingSource {
         downPoint = nil
     }
 }
-
-// MARK: - 独立放大实时查看浮窗
 
 final class LiveZoomView: NSView {
     let imageLayer = CALayer()
@@ -1887,9 +1854,9 @@ final class ZoomPanel: NSPanel {
         let panelWidth: CGFloat = spec.crop == nil ? 760 : 520
         let panelHeight = (panelWidth / spec.aspect).rounded()
         let screen = NSScreen.screens.first { $0.frame.intersects(cardRect) } ?? NSScreen.main
-        let vis = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let originX = min(max(cardRect.midX - panelWidth / 2, vis.minX + 8), vis.maxX - panelWidth - 8)
-        let originY = max(vis.minY + 8, cardRect.minY - panelHeight - 28)
+        let visibleRect = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let originX = min(max(cardRect.midX - panelWidth / 2, visibleRect.minX + 8), visibleRect.maxX - panelWidth - 8)
+        let originY = max(visibleRect.minY + 8, cardRect.minY - panelHeight - 28)
         let target = NSRect(x: originX, y: originY, width: panelWidth, height: panelHeight)
 
         super.init(contentRect: target,
@@ -1920,8 +1887,6 @@ final class ZoomPanel: NSPanel {
         }
     }
 }
-
-// MARK: - 全局快捷键注册
 
 final class HotKey {
     private var hotKeyRef: EventHotKeyRef?
@@ -1964,8 +1929,6 @@ final class ClosureMenuItem: NSMenuItem {
 
     @objc private func fire() { handler() }
 }
-
-// MARK: - 应用主代理
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     var panel: LinePanel!
@@ -2094,9 +2057,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 self.toggleZoom(card)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     if let zoomPanel = self.zooms[card.spec.id], let contentView = zoomPanel.contentView,
-                       let rep = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) {
-                        contentView.cacheDisplay(in: contentView.bounds, to: rep)
-                        if let pngBytes = rep.representation(using: .png, properties: [:]) {
+                       let bitmapRep = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) {
+                        contentView.cacheDisplay(in: contentView.bounds, to: bitmapRep)
+                        if let pngBytes = bitmapRep.representation(using: .png, properties: [:]) {
                             FileIO.writeData(
                                 pngBytes,
                                 to: Paths.snapshots.appendingPathComponent("d1_clothesline_zoom_latest.png"),
@@ -2160,13 +2123,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         for sig in [SIGTERM, SIGINT, SIGHUP] {
             signal(sig, SIG_IGN)
-            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-            src.setEventHandler { [weak self] in
+            let signalSource = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            signalSource.setEventHandler { [weak self] in
                 self?.cleanUpForExit()
                 exit(0)
             }
-            src.resume()
-            signalSources.append(src)
+            signalSource.resume()
+            signalSources.append(signalSource)
         }
     }
 
@@ -2174,8 +2137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let hidden = Settings.hiddenFeeds
         return allFeeds.filter { !hidden.contains($0.id) }
     }
-
-    // MARK: - 截图卡片管理
 
     func startScreenshots() {
         ScreenshotInbox.apply()
@@ -2315,8 +2276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return menuObj
     }
 
-    // 实时帧与遥测同步刷新
-
     func handleFrame(_ frameImage: CGImage) {
         // 2秒滑窗平滑突发帧率
         let now = CACurrentMediaTime()
@@ -2436,19 +2395,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         CATransaction.commit()
     }
 
-    // 灵动岛悬停收放控制
-
     /// 重建窗口防跨空间残留
     func keepOnActiveSpace() {
         guard isRevealed, panel != nil, panel.isVisible, !panel.isOnActiveSpace else { return }
-        let old = panel!
-        let content = old.contentView
-        old.contentView = NSView()
-        old.orderOut(nil)
+        let previousPanel = panel!
+        let content = previousPanel.contentView
+        previousPanel.contentView = NSView()
+        previousPanel.orderOut(nil)
         let fresh = LinePanel(content: content ?? lineView)
-        fresh.setFrame(old.frame, display: false)
-        fresh.ignoresMouseEvents = old.ignoresMouseEvents
-        fresh.alphaValue = old.alphaValue
+        fresh.setFrame(previousPanel.frame, display: false)
+        fresh.ignoresMouseEvents = previousPanel.ignoresMouseEvents
+        fresh.alphaValue = previousPanel.alphaValue
         panel = fresh
         fresh.orderFrontRegardless()
     }
@@ -2712,8 +2669,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         breezeTimer = nextTimer
     }
 
-    // 卡片放大截帧与菜单操作
-
     func toggleZoom(_ card: Card) {
         if let existingZoom = zooms[card.spec.id] {
             existingZoom.close()
@@ -2789,10 +2744,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         } else {
             targetImg = nil
         }
-        guard let cg = targetImg else { return }
+        guard let cgImage = targetImg else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([NSImage(cgImage: cg, size: .zero)])
+        pasteboard.writeObjects([NSImage(cgImage: cgImage, size: .zero)])
     }
 
     func takeDown(_ card: Card) {
@@ -2864,8 +2819,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         updateStatusTitle()
     }
-
-    // 状态栏菜单装配与更新
 
     func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -2952,22 +2905,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         sizeItem.submenu = sizes
         menu.addItem(sizeItem)
 
-        let src = NSMenu()
-        src.addItem(ClosureMenuItem("流畅 · 子码流 640×360 (~20fps)", state: Settings.hd ? .off : .on) { [weak self] in
+        let sourceMenu = NSMenu()
+        sourceMenu.addItem(ClosureMenuItem("流畅 · 子码流 640×360 (~20fps)", state: Settings.hd ? .off : .on) { [weak self] in
             Settings.hd = false
             self?.frames.hd = false
         })
-        src.addItem(ClosureMenuItem("超清 · 主码流 2304×1296 → 720p", state: Settings.hd ? .on : .off) { [weak self] in
+        sourceMenu.addItem(ClosureMenuItem("超清 · 主码流 2304×1296 → 720p", state: Settings.hd ? .on : .off) { [weak self] in
             Settings.hd = true
             self?.frames.hd = true
         })
-        src.addItem(.separator())
-        src.addItem(ClosureMenuItem("立即刷新 Insta360 X4 Air 360° 全景与侧视 (10.10.137.106)") { [weak self] in
+        sourceMenu.addItem(.separator())
+        sourceMenu.addItem(ClosureMenuItem("立即刷新 Insta360 X4 Air 360° 全景与侧视 (10.10.137.106)") { [weak self] in
             self?.insta360.triggerRefresh()
         })
-        let srcItem = NSMenuItem(title: "视频源", action: nil, keyEquivalent: "")
-        srcItem.submenu = src
-        menu.addItem(srcItem)
+        let sourceMenuItem = NSMenuItem(title: "视频源", action: nil, keyEquivalent: "")
+        sourceMenuItem.submenu = sourceMenu
+        menu.addItem(sourceMenuItem)
         menu.addItem(.separator())
 
         menu.addItem(ClosureMenuItem("打开 D1 实时监控浮窗") { [weak self] in self?.openMonitorApp() })
@@ -2986,8 +2939,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     static func captureStamp() -> String {
         captureStampFormatter.string(from: Date())
     }
-
-    // 离线导出合成调试快照
 
     func exportDebugSnapshot() {
         guard let root = lineView.layer else { return }
@@ -3016,8 +2967,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         )
     }
 }
-
-// 内置几何与状态机自测
 
 func runSelfTests() -> Int32 {
     var failures: [String] = []
@@ -3098,46 +3047,46 @@ func runSelfTests() -> Int32 {
     Settings.hoverReveal = true
 
     let testDelegate = AppDelegate()
-    let t0 = Date()
+    let startTime = Date()
 
     testDelegate.isRevealed = false
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t0, metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: startTime, metricsOverride: mbp16, pressedButtons: 0)
     check(!testDelegate.isRevealed && testDelegate.hotZoneSince != nil, "Initial Notch hover arms hotZoneSince")
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t0.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: startTime.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.isRevealed, "Hovering at Notch bottom boundary (864, 1083.0) for 0.09s reveals clothesline")
 
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1070.0), now: t0.addingTimeInterval(1.0), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1070.0), now: startTime.addingTimeInterval(1.0), metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.isRevealed && testDelegate.awaySince == nil, "Remaining in Notch apron (864, 1070.0) keeps clothesline open")
 
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 400.0), now: t0.addingTimeInterval(2.0), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 400.0), now: startTime.addingTimeInterval(2.0), metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.isRevealed && testDelegate.awaySince != nil, "Leaving panel starts awaySince timer")
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 400.0), now: t0.addingTimeInterval(2.55), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 400.0), now: startTime.addingTimeInterval(2.55), metricsOverride: mbp16, pressedButtons: 0)
     check(!testDelegate.isRevealed, "Leaving panel for >= 0.5s tucks clothesline")
 
     testDelegate.menuBarSuppressed = true
     testDelegate.suppressedAtPoint = NSPoint(x: 1400, y: 1100)
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: t0.addingTimeInterval(3.0), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: startTime.addingTimeInterval(3.0), metricsOverride: mbp16, pressedButtons: 0)
     check(!testDelegate.menuBarSuppressed, "Moving into Notch clears menuBarSuppressed immediately")
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: t0.addingTimeInterval(3.09), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: startTime.addingTimeInterval(3.09), metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.isRevealed, "Sliding from suppressed menu bar into Notch reveals clothesline")
 
     testDelegate.firstCollapseArmed = true
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1117.0), now: t0.addingTimeInterval(4.0), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1117.0), now: startTime.addingTimeInterval(4.0), metricsOverride: mbp16, pressedButtons: 0)
     check(!testDelegate.firstCollapseArmed, "Visiting Notch/panel disarms firstCollapseArmed (heldUntilEnter)")
 
     testDelegate.tuck()
-    let t1 = t0.addingTimeInterval(5.0)
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t1, metricsOverride: mbp16, pressedButtons: 0)
+    let hoverResumeTime = startTime.addingTimeInterval(5.0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: hoverResumeTime, metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.hotZoneSince != nil, "Hover start sets hotZoneSince")
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1020.0), now: t1.addingTimeInterval(0.03), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1020.0), now: hoverResumeTime.addingTimeInterval(0.03), metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.hotZoneSince != nil, "Brief 30ms dip below Notch apron preserves hotZoneSince via hysteresis")
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t1.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: hoverResumeTime.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
     check(testDelegate.isRevealed, "Returning to Notch within hysteresis completes reveal at 90ms")
 
     testDelegate.tuck()
-    let t2 = t0.addingTimeInterval(6.0)
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t2, metricsOverride: mbp16, pressedButtons: 1)
-    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t2.addingTimeInterval(0.30), metricsOverride: mbp16, pressedButtons: 1)
+    let dragCheckTime = startTime.addingTimeInterval(6.0)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: dragCheckTime, metricsOverride: mbp16, pressedButtons: 1)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: dragCheckTime.addingTimeInterval(0.30), metricsOverride: mbp16, pressedButtons: 1)
     check(!testDelegate.isRevealed, "Mouse button pressed (window drag) does not trigger hover reveal")
 
     testDelegate.reveal()
@@ -3152,7 +3101,7 @@ func runSelfTests() -> Int32 {
     let act1 = ClotheslineHoverController.evaluate(
         state: &pureState,
         mouse: NSPoint(x: 200, y: 1095),
-        now: t0,
+        now: startTime,
         metrics: mbp16,
         panelFrame: panelFrame,
         pinned: false,
@@ -3163,7 +3112,7 @@ func runSelfTests() -> Int32 {
     let act2 = ClotheslineHoverController.evaluate(
         state: &pureState,
         mouse: NSPoint(x: 864, y: 1083),
-        now: t0.addingTimeInterval(0.02),
+        now: startTime.addingTimeInterval(0.02),
         metrics: mbp16,
         panelFrame: panelFrame,
         pinned: false,

@@ -2,8 +2,6 @@ import Cocoa
 import Darwin
 import Foundation
 
-// 链路日志与安全文件读写
-
 enum TraceLogger {
     static func makeOperationId(prefix: String = "mon") -> String {
         let rawUuid = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -182,8 +180,6 @@ struct Insta360SceneGraphParser {
     }
 }
 
-// 遥测状态模型与流模式
-
 struct ArmTelemetry {
     var name: String
     var ip: String
@@ -237,7 +233,6 @@ final class MonitorState {
     var alwaysOnTop: Bool = true
     var streamMode: StreamMode = .rtspSub
 
-    // Insta360环视状态
     var insta360PanoImage: NSImage?
     var insta360RectImage: NSImage?
     var insta360HUDImage: NSImage?
@@ -273,14 +268,10 @@ final class MonitorState {
     ]
 }
 
-// 可拖拽置顶监控浮窗
-
 final class FloatingMonitorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
-
-// 视频与矢量遥测叠加画布
 
 final class VideoHUDView: NSView {
     let state: MonitorState
@@ -343,7 +334,7 @@ final class VideoHUDView: NSView {
         let connected = state.streamConnected
         let statusText = state.streamStatusText
         let mode = state.streamMode
-        let cyc = state.cycleCount
+        let cycleCount = state.cycleCount
         let skill = state.currentSkill
         let phase = state.currentPhase
         let cont = state.continuousMode
@@ -373,7 +364,6 @@ final class VideoHUDView: NSView {
                 hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)]
             )
         } else {
-            // 连接中占位提示
             let pStyle = NSMutableParagraphStyle()
             pStyle.alignment = .center
             let attrs: [NSAttributedString.Key: Any] = [
@@ -381,19 +371,17 @@ final class VideoHUDView: NSView {
                 .foregroundColor: NSColor(calibratedRed: 0.58, green: 0.64, blue: 0.72, alpha: 1.0),
                 .paragraphStyle: pStyle
             ]
-            let str = "📡 \(statusText)\n(支持鼠标任意位置拖拽移动 · 双击切换大小 · 右键菜单控制)"
-            str.draw(in: NSRect(x: 20, y: videoRect.midY - 24, width: bounds.width - 40, height: 52), withAttributes: attrs)
+            let placeholderText = "📡 \(statusText)\n(支持鼠标任意位置拖拽移动 · 双击切换大小 · 右键菜单控制)"
+            placeholderText.draw(in: NSRect(x: 20, y: videoRect.midY - 24, width: bounds.width - 40, height: 52), withAttributes: attrs)
         }
 
         let hasInstaPiP = showInstaPiP && (mode == .rtspSub || mode == .rtspHD || mode == .hubHTTP)
             && (instaPano != nil || instaRect != nil)
 
-        // 俯视流叠加三臂ROI框
         if showROI && (mode == .rtspSub || mode == .rtspHD) {
             drawROIBoxes(in: videoRect, arms: arms, avoidTopLeftPiP: hasInstaPiP)
         }
 
-        // 叠加Insta360画中画
         if hasInstaPiP {
             drawInsta360PiPCard(
                 in: videoRect,
@@ -406,7 +394,6 @@ final class VideoHUDView: NSView {
             )
         }
 
-        // 右上角绘制实时状态胶囊
         let effectiveConnected = (mode == .insta360HUD || mode == .insta360Rectilinear) ? (img != nil) : connected
         let effectiveFPS = (mode == .insta360HUD || mode == .insta360Rectilinear) ? 30.0 : fps
         drawLiveStatusBadge(
@@ -415,17 +402,16 @@ final class VideoHUDView: NSView {
             fps: effectiveFPS,
             mode: mode,
             continuous: cont,
-            cycle: cyc
+            cycle: cycleCount
         )
 
-        // 底部绘制编码器遥测条
         if showBottom {
             drawBottomTelemetryBar(
                 in: videoRect,
                 arms: arms,
                 skill: skill,
                 phase: phase,
-                cycle: cyc,
+                cycle: cycleCount,
                 continuous: cont,
                 instaOnline: instaOnline,
                 instaFrames: instaFrames,
@@ -548,7 +534,6 @@ final class VideoHUDView: NSView {
             )
         }
 
-        // 绘制插头插座织物框
         let targets: [(String, NSRect, NSColor)] = [
             ("🔌 插头 Plug", NSRect(x: 520.0 / 2304.0, y: 1060.0 / 1296.0, width: 170.0 / 2304.0, height: 155.0 / 1296.0),
              NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.04, alpha: 0.9)),
@@ -595,7 +580,6 @@ final class VideoHUDView: NSView {
         path.lineWidth = 1.0
         path.stroke()
 
-        // 状态灯圆点
         let dotRect = NSRect(x: pillRect.minX + 9, y: pillRect.minY + 6.5, width: 10, height: 10)
         let dotPath = NSBezierPath(ovalIn: dotRect)
         if connected {
@@ -606,14 +590,14 @@ final class VideoHUDView: NSView {
         dotPath.fill()
 
         let workTag = continuous ? "24/7#\(cycle)" : "待命#\(cycle)"
-        let txt = connected
+        let pillText = connected
             ? String(format: "LIVE %.1f FPS · %@ · %@", fps, mode.shortTitle, workTag)
             : "重连中 · \(mode.shortTitle)"
         let attrs: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .semibold),
             .foregroundColor: NSColor.white
         ]
-        (txt as NSString).draw(at: NSPoint(x: pillRect.minX + 23, y: pillRect.minY + 4.5), withAttributes: attrs)
+        (pillText as NSString).draw(at: NSPoint(x: pillRect.minX + 23, y: pillRect.minY + 4.5), withAttributes: attrs)
     }
 
     private func drawBottomTelemetryBar(
@@ -644,7 +628,6 @@ final class VideoHUDView: NSView {
         let fontBold = NSFont.monospacedDigitSystemFont(ofSize: fSize, weight: .bold)
         let fontSub = NSFont.systemFont(ofSize: fSize, weight: .medium)
 
-        // 首行三臂关节角汇总
         let lArm = arms["left_103"]?.joints ?? [0, 0, 0, 0, 0, 0, 0]
         let cArm = arms["center_102"]?.joints ?? [0, 0, 0, 0, 0, 0, 0]
         let rArm = arms["right_101"]?.joints ?? [0, 0, 0, 0, 0, 0, 0]
@@ -665,7 +648,6 @@ final class VideoHUDView: NSView {
             withAttributes: line1Attrs
         )
 
-        // 次行技能与环视净空
         let modeBadge = continuous ? "🔥 24/7进化中" : "⏸ 手动监控"
         let instaTag = String(format: "🌐Insta360(106): 30fps/%dms/Z净空%.1fmm", instaAgeMs, instaZ)
         let line2 = "\(modeBadge) | \(instaTag) | 技能: \(skill) | \(phase)"
@@ -680,8 +662,6 @@ final class VideoHUDView: NSView {
         )
     }
 }
-
-// 视频流与遥测后台线程
 
 private func loadLocalStreamConfig(_ key: String, fallback: String) -> String {
     if let envValue = ProcessInfo.processInfo.environment[key], !envValue.isEmpty { return envValue }
@@ -940,15 +920,15 @@ final class LiveStreamController {
             state.lock.unlock()
             if currentMode != .hubHTTP { break }
 
-            let sem = DispatchSemaphore(value: 0)
-            let task = session.dataTask(with: snapURL) { [weak self] responseBytes, resp, err in
-                defer { sem.signal() }
-                if let err {
+            let semaphore = DispatchSemaphore(value: 0)
+            let task = session.dataTask(with: snapURL) { [weak self] responseBytes, resp, requestError in
+                defer { semaphore.signal() }
+                if let requestError {
                     TraceLogger.warn(
                         operationId: TraceLogger.makeOperationId(prefix: "hubsnap"),
                         component: "LiveStreamController",
                         message: "Hub snapshot request failed",
-                        error: err
+                        error: requestError
                     )
                     return
                 }
@@ -963,7 +943,7 @@ final class LiveStreamController {
                 self.deliverFrame(img)
             }
             task.resume()
-            _ = sem.wait(timeout: .now() + 2.0)
+            _ = semaphore.wait(timeout: .now() + 2.0)
             Thread.sleep(forTimeInterval: 0.14)
         }
     }
@@ -1097,8 +1077,6 @@ final class LiveStreamController {
         }
     }
 
-    // UDP机械臂与中控遥测同步
-
     private func telemetryLoop() {
         let sessionCfg = URLSessionConfiguration.ephemeral
         sessionCfg.timeoutIntervalForRequest = 0.8
@@ -1127,9 +1105,9 @@ final class LiveStreamController {
 
             // 降频轮询中控减负
             if tick % 3 == 0, let url = statusURL {
-                let task = session.dataTask(with: url) { [weak self] payloadData, _, err in
+                let task = session.dataTask(with: url) { [weak self] payloadData, _, requestError in
                     guard let self = self,
-                          err == nil,
+                          requestError == nil,
                           let payloadData = payloadData else {
                         return
                     }
@@ -1147,7 +1125,7 @@ final class LiveStreamController {
                     }
                     self.state.lock.lock()
                     if let cont = decoded.continuous_mode { self.state.continuousMode = cont }
-                    if let cyc = decoded.cycle_count { self.state.cycleCount = cyc }
+                    if let cycleCount = decoded.cycle_count { self.state.cycleCount = cycleCount }
                     if let skillName = decoded.current_skill { self.state.currentSkill = skillName }
                     if let phaseName = decoded.current_phase { self.state.currentPhase = phaseName }
                     self.state.lock.unlock()
@@ -1187,12 +1165,12 @@ final class LiveStreamController {
         }
         guard sent > 0 else { return nil }
 
-        var buf = [UInt8](repeating: 0, count: 256)
-        let bytesRead = recv(sockFd, &buf, buf.count - 1, 0)
+        var receiveBuffer = [UInt8](repeating: 0, count: 256)
+        let bytesRead = recv(sockFd, &receiveBuffer, receiveBuffer.count - 1, 0)
         guard bytesRead > 0 else { return nil }
 
-        let str = String(decoding: buf.prefix(bytesRead), as: UTF8.self)
-        let parts = str.split(whereSeparator: { $0.isWhitespace })
+        let replyText = String(decoding: receiveBuffer.prefix(bytesRead), as: UTF8.self)
+        let parts = replyText.split(whereSeparator: { $0.isWhitespace })
         guard parts.count >= 8, parts[0] == "OK" else { return nil }
         var vals: [Double] = []
         for tokenIdx in 1...7 {
@@ -1227,12 +1205,12 @@ final class LiveStreamController {
             )
             return
         }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(opId, forHTTPHeaderField: "X-Operation-ID")
-        req.httpBody = bodyData
-        URLSession.shared.dataTask(with: req) { [weak self] _, response, error in
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(opId, forHTTPHeaderField: "X-Operation-ID")
+        request.httpBody = bodyData
+        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
             if let error {
                 TraceLogger.warn(
                     operationId: opId,
@@ -1258,13 +1236,11 @@ final class LiveStreamController {
     }
 }
 
-// 生命周期与窗口界面装配
-
 enum MonitorDateFormatters {
     static let fileStamp: DateFormatter = {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyyMMdd_HHmmss"
-        return fmt
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        return formatter
     }()
 }
 
@@ -1276,7 +1252,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var signalSources: [DispatchSourceSignal] = []
 
-    // 顶栏状态反射按钮
     var pinButton: NSButton!
     var roiButton: NSButton!
     var instaButton: NSButton!
@@ -1327,13 +1302,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         for sig in [SIGTERM, SIGINT, SIGHUP] {
             signal(sig, SIG_IGN)
-            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
-            src.setEventHandler { [weak self] in
+            let signalSource = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            signalSource.setEventHandler { [weak self] in
                 self?.streamController?.stop()
                 exit(0)
             }
-            src.resume()
-            signalSources.append(src)
+            signalSource.resume()
+            signalSources.append(signalSource)
         }
     }
 
@@ -1371,7 +1346,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.layer?.cornerRadius = 10
         container.layer?.masksToBounds = true
 
-        // 实时视频遥测画布
         videoView = VideoHUDView(state: state)
         videoView.frame = container.bounds
         videoView.autoresizingMask = [.width, .height]
@@ -1380,7 +1354,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         container.addSubview(videoView)
 
-        // 顶部半透明控制栏
         let headerHeight: CGFloat = 36
         let headerBar = NSVisualEffectView(
             frame: NSRect(x: 0, y: initialRect.height - headerHeight, width: initialRect.width, height: headerHeight)
@@ -1396,7 +1369,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         titleLabel.frame = NSRect(x: 72, y: 8, width: 136, height: 20)
         headerBar.addSubview(titleLabel)
 
-        // 顶栏右侧快捷按钮组
         let btnStack = NSStackView()
         btnStack.orientation = .horizontal
         btnStack.spacing = 4
@@ -1429,11 +1401,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func makePillButton(title: String, action: Selector) -> NSButton {
-        let btn = NSButton(title: title, target: self, action: action)
-        btn.bezelStyle = .roundRect
-        btn.font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
-        btn.controlSize = .small
-        return btn
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .roundRect
+        button.font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+        button.controlSize = .small
+        return button
     }
 
     private func setupStatusBarItem() {
@@ -1514,8 +1486,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         streamButton?.title = "📺\(mode.shortTitle)"
         workButton?.title = cont ? "🔥24/7" : "⚡抓插"
     }
-
-    // 交互与远程控制动作
 
     @objc func bringToFront() {
         panel.makeKeyAndOrderFront(nil)
@@ -1669,8 +1639,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// 内置解析与协议自测
-
 func runSelfTests() -> Int32 {
     var failures: [String] = []
     func check(_ condition: @autoclosure () -> Bool, _ msg: String) {
@@ -1718,8 +1686,6 @@ func runSelfTests() -> Int32 {
 if CommandLine.arguments.contains("--self-test") {
     exit(runSelfTests())
 }
-
-// 启动监控主应用事件循环
 
 let app = NSApplication.shared
 let delegate = AppDelegate()

@@ -202,7 +202,7 @@ class TestInsta360PerceptionBridge:
 
         monkeypatch.setattr("subprocess.run", raise_timeout)
 
-        # 无本地缓存帧时进入 DEGRADED_NO_FRAME
+        # 无本地缓存时防假阳性回退
         degraded = bridge.probe_and_capture_frame(operation_id="test-op-degraded")
         assert degraded.capture_state == "DEGRADED_NO_FRAME"
         assert degraded.ssh_probe_succeeded is False
@@ -211,7 +211,7 @@ class TestInsta360PerceptionBridge:
         assert degraded.rectilinear_projection_succeeded is False
         assert len(degraded.diagnostic_errors) >= 1
 
-        # 有本地缓存帧但 SSH 失败时，传输为 False、本地缓存可用为 True
+        # 断连有缓存时区分传输与缓存状态
         pano = np.full((120, 240, 3), 90, dtype=np.uint8)
         cv2.imwrite(str(bridge.out_dir / "insta360_live_360.bmp"), pano)
         cached = bridge.probe_and_capture_frame(operation_id="test-op-cached")
@@ -222,7 +222,7 @@ class TestInsta360PerceptionBridge:
         assert cached.rectilinear_projection_succeeded is True
         assert len(cached.diagnostic_errors) >= 1
 
-        # SSH 成功但 SCP 返回非零退出码时降级为 CACHED_FALLBACK
+        # SCP 失败时防伪报实时状态
         class FakeProc:
             def __init__(
                 self, returncode: int, stdout: str = "", stderr: str = ""
@@ -289,16 +289,22 @@ class TestInsta360PerceptionBridge:
 
         check_code = (
             "import sys; "
+            "sys.modules['uni_robot_agent'] = None; "
             "from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge; "
             "assert 'rsi.sim.validator' not in sys.modules; "
             "assert 'rsi.integrations' not in sys.modules; "
             "import rsi.sim as sim_pkg; "
-            "import rsi.integrations as int_pkg; "
             "assert 'UnitreeD1PhysicsPlant' in dir(sim_pkg); "
             "assert 'SimulationValidator' in dir(sim_pkg); "
-            "assert 'GeminiRoboticsPlanner' in dir(int_pkg); "
             "assert sim_pkg.UnitreeD1PhysicsPlant is not None; "
-            "assert int_pkg.GeminiRoboticsPlanner is not None"
+            "assert sim_pkg.SimulationValidator is not None; "
+            "assert 'rsi.integrations' not in sys.modules; "
+            "import rsi.integrations as int_pkg; "
+            "assert 'GeminiRoboticsPlanner' in dir(int_pkg); "
+            "assert int_pkg.GeminiRoboticsPlanner is not None; "
+            "assert int_pkg.detect_colored_object_pixel is not None; "
+            "assert int_pkg.appendix_e_least_squares_triangulate is not None; "
+            "assert int_pkg.appendix_e_table_plane_sweep is not None"
         )
         proc = subprocess.run(
             [sys.executable, "-c", check_code],

@@ -97,6 +97,9 @@ def test_no_sigstop_sent_to_macos_clothesline_or_monitor() -> None:
 def test_swift_sources_have_short_comments_and_no_single_letter_bindings() -> None:
     import re
 
+    forbidden_abbreviations = (
+        r"\b(?:let|var)\s+(?:cg|t0|t1|t2|vis|src|cfg|rep|cyc|txt|str|buf|sem|err|req|fmt|btn)\b"
+    )
     for swift_file in (CLOTHESLINE_SWIFT_SRC, MONITOR_SWIFT_SRC):
         source = swift_file.read_text(encoding="utf-8")
         for line_no, raw_line in enumerate(source.splitlines(), 1):
@@ -104,6 +107,9 @@ def test_swift_sources_have_short_comments_and_no_single_letter_bindings() -> No
             comment_match = re.search(r"//+(.*)", line_no_strings)
             if comment_match:
                 comment_body = comment_match.group(1).strip()
+                assert not comment_body.startswith("MARK:"), (
+                    f"{swift_file.name}:{line_no} contains section-divider comment: {comment_body!r}"
+                )
                 assert len(comment_body) <= 20, (
                     f"{swift_file.name}:{line_no} comment exceeds 20 chars "
                     f"({len(comment_body)}): {comment_body!r}"
@@ -111,6 +117,16 @@ def test_swift_sources_have_short_comments_and_no_single_letter_bindings() -> No
             assert re.search(r"\b(?:let|var)\s+[a-zA-Z]\b", raw_line) is None, (
                 f"{swift_file.name}:{line_no} has single-letter binding: {raw_line}"
             )
+            assert re.search(r"\bfor\s+[a-zA-Z]\s+in\b", raw_line) is None, (
+                f"{swift_file.name}:{line_no} has single-letter loop binding: {raw_line}"
+            )
             assert (
                 re.search(r"[_a-zA-Z0-9]+\s+[a-zA-Z]\s*:\s*[A-Z]", raw_line) is None
             ), f"{swift_file.name}:{line_no} has single-letter parameter: {raw_line}"
+            assert (
+                re.search(r"func\s+[a-zA-Z0-9_]+\(\s*[a-zA-Z]\s*:", raw_line) is None
+            ), f"{swift_file.name}:{line_no} has unlabeled single-letter parameter: {raw_line}"
+            assert re.search(forbidden_abbreviations, raw_line) is None, (
+                f"{swift_file.name}:{line_no} has meaningless abbreviation: {raw_line}"
+            )
+
