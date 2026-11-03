@@ -92,3 +92,25 @@ def test_no_sigstop_sent_to_macos_clothesline_or_monitor() -> None:
         engine_source = engine_path.read_text(encoding="utf-8")
         assert '"D1Clothesline"' not in engine_source
         assert '"D1LiveMonitor"' not in engine_source
+
+
+def test_swift_sources_have_short_comments_and_no_single_letter_bindings() -> None:
+    import re
+
+    for swift_file in (CLOTHESLINE_SWIFT_SRC, MONITOR_SWIFT_SRC):
+        source = swift_file.read_text(encoding="utf-8")
+        for line_no, raw_line in enumerate(source.splitlines(), 1):
+            line_no_strings = re.sub(r"\"(?:\\.|[^\"\\])*\"", '""', raw_line)
+            comment_match = re.search(r"//+(.*)", line_no_strings)
+            if comment_match:
+                comment_body = comment_match.group(1).strip()
+                assert len(comment_body) <= 20, (
+                    f"{swift_file.name}:{line_no} comment exceeds 20 chars "
+                    f"({len(comment_body)}): {comment_body!r}"
+                )
+            assert re.search(r"\b(?:let|var)\s+[a-zA-Z]\b", raw_line) is None, (
+                f"{swift_file.name}:{line_no} has single-letter binding: {raw_line}"
+            )
+            assert (
+                re.search(r"[_a-zA-Z0-9]+\s+[a-zA-Z]\s*:\s*[A-Z]", raw_line) is None
+            ), f"{swift_file.name}:{line_no} has single-letter parameter: {raw_line}"

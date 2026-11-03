@@ -283,3 +283,36 @@ class TestInsta360PerceptionBridge:
         md_text = report_md.read_text(encoding="utf-8")
         assert "IAFEA2510H4E6N" in md_text
         assert "360°" in md_text
+
+    def test_package_level_imports_decoupled(self) -> None:
+        import sys
+
+        check_code = (
+            "import sys; "
+            "from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge; "
+            "assert 'rsi.sim.validator' not in sys.modules; "
+            "assert 'rsi.integrations' not in sys.modules; "
+            "import rsi.sim as sim_pkg; "
+            "import rsi.integrations as int_pkg; "
+            "assert 'UnitreeD1PhysicsPlant' in dir(sim_pkg); "
+            "assert 'SimulationValidator' in dir(sim_pkg); "
+            "assert 'GeminiRoboticsPlanner' in dir(int_pkg); "
+            "assert sim_pkg.UnitreeD1PhysicsPlant is not None; "
+            "assert int_pkg.GeminiRoboticsPlanner is not None"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", check_code],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert proc.returncode == 0, f"Subprocess failed: {proc.stderr}"
+
+        import rsi.integrations as int_pkg
+        import rsi.sim as sim_pkg
+
+        with pytest.raises(AttributeError):
+            _ = sim_pkg.non_existent_symbol_xyz
+        with pytest.raises(AttributeError):
+            _ = int_pkg.non_existent_symbol_xyz

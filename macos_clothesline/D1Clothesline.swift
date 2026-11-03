@@ -1,14 +1,4 @@
-// D1Clothesline — 实时视频"晾衣绳"
-//
-// 灵感来自 alejandrobujan/tendedero（把截图晾在屏幕顶部的一根绳子上）。
-// 这里晾的不是截图，而是 1F 俯视摄像头的实时视频流：
-//   · 全景 + 左臂103 / 中臂102 / 右臂101 三个局部特写，一直挂在绳子上实时播放；
-//   · 平时绳子收在菜单栏里，不挡任何东西；
-//   · 鼠标停到屏幕顶部菜单栏 0.25s，绳子带着视频滑下来；鼠标离开 0.5s 自动收回；
-//   · 只有鼠标点在视频卡片上才会响应，其余区域点击全部穿透给下面的 App。
-//
-// 手势：单击卡片 = 弹出可拖拽的大浮窗实时查看；双击 = 打开 D1LiveMonitor.app；
-//       拖出卡片 = 把当前帧 PNG 拖进任意 App / Finder；右键 = 菜单；⌃⌥D = 显示/收起。
+// 顶部灵动岛实时视频晾衣绳浮窗
 
 import Cocoa
 import Carbon
@@ -16,7 +6,7 @@ import ImageIO
 import Darwin
 import AVFoundation
 
-// MARK: - Paths & Settings
+// MARK: - 路径与偏好配置
 
 enum Paths {
     static let repoRoot = URL(fileURLWithPath: "/Users/zhang/Documents/RSI")
@@ -26,7 +16,7 @@ enum Paths {
     static let pythonBin = repoRoot.appendingPathComponent(".venv/bin/python")
 }
 
-// MARK: - Structured Trace Logging & Safe File IO
+// MARK: - 链路日志与文件写入
 
 enum TraceLogger {
     static func makeOperationId(prefix: String = "cl") -> String {
@@ -79,7 +69,7 @@ enum FileIO {
     }
 }
 
-// MARK: - Typed Telemetry & Scene Graph Parsers
+// MARK: - 遥测与场景图解析
 
 struct HubStatusPayload: Decodable {
     let continuous_mode: Bool?
@@ -168,59 +158,62 @@ struct Insta360SceneGraphParser {
 }
 
 enum Settings {
-    private static let d = UserDefaults.standard
+    private static let defaults = UserDefaults.standard
 
-    /// 一直晾着：绳子不自动收回。
+    /// 常驻展开避免监控时自动收起
     static var pinned: Bool {
-        get { d.bool(forKey: "pinned") }
-        set { d.set(newValue, forKey: "pinned") }
+        get { defaults.bool(forKey: "pinned") }
+        set { defaults.set(newValue, forKey: "pinned") }
     }
-    /// 鼠标停在菜单栏时滑下。
+    /// 顶栏悬停自动滑出
     static var hoverReveal: Bool {
-        get { !d.bool(forKey: "hoverRevealOff") }
-        set { d.set(!newValue, forKey: "hoverRevealOff") }
+        get { !defaults.bool(forKey: "hoverRevealOff") }
+        set { defaults.set(!newValue, forKey: "hoverRevealOff") }
     }
-    /// 超清源（stream1 → 1280×720），否则流畅子码流（stream2 640×360）。
+    /// 按需切换主子码流权衡带宽
     static var hd: Bool {
-        get { d.bool(forKey: "hd") }
-        set { d.set(newValue, forKey: "hd") }
+        get { defaults.bool(forKey: "hd") }
+        set { defaults.set(newValue, forKey: "hd") }
     }
     static var sizeScale: CGFloat {
-        get { let v = d.double(forKey: "sizeScale"); return v > 0 ? CGFloat(v) : 1.0 }
-        set { d.set(Double(newValue), forKey: "sizeScale") }
+        get {
+            let storedScale = defaults.double(forKey: "sizeScale")
+            return storedScale > 0 ? CGFloat(storedScale) : 1.0
+        }
+        set { defaults.set(Double(newValue), forKey: "sizeScale") }
     }
     static var hiddenFeeds: Set<String> {
-        get { Set(d.stringArray(forKey: "hiddenFeeds") ?? []) }
-        set { d.set(Array(newValue), forKey: "hiddenFeeds") }
+        get { Set(defaults.stringArray(forKey: "hiddenFeeds") ?? []) }
+        set { defaults.set(Array(newValue), forKey: "hiddenFeeds") }
     }
-    /// 接管系统截图快捷键（⌘⇧3/4/5），截图挂到晾衣绳上。
+    /// 接管系统截图直接挂上晾衣绳
     static var takeOverScreenshots: Bool {
-        get { !d.bool(forKey: "screenshotsOff") }
-        set { d.set(!newValue, forKey: "screenshotsOff") }
+        get { !defaults.bool(forKey: "screenshotsOff") }
+        set { defaults.set(!newValue, forKey: "screenshotsOff") }
     }
-    /// Screenshots currently pegged on the line, oldest first.
+    /// 按时间顺序保存已挂截图路径
     static var peggedShots: [String] {
-        get { d.stringArray(forKey: "peggedShots") ?? [] }
-        set { d.set(newValue, forKey: "peggedShots") }
+        get { defaults.stringArray(forKey: "peggedShots") ?? [] }
+        set { defaults.set(newValue, forKey: "peggedShots") }
     }
     static let maxShots = 6
 }
 
-// MARK: - Feeds (RTSP overhead + Insta360 X4 Air 360°/rectilinear + screenshots)
+// MARK: - 视频流与截图卡片配置
 
 struct FeedSpec {
     let id: String
     let title: String
-    /// Normalized crop in top-left image coordinates; nil = full frame.
+    /// 归一化裁剪框适配不同分辨率
     let crop: CGRect?
     let armKey: String?
     let ip: String?
     let accent: NSColor
-    /// A screenshot / screen recording hung on the line (not a live feed).
+    /// 区分本地截图与实时视频流
     var fileURL: URL? = nil
     var fixedAspect: CGFloat? = nil
     var isRecording = false
-    /// Non-nil for Insta360 X4 Air feeds ("pano" or "rect_workbench")
+    /// 标识全景或针孔反投影视图
     var insta360Key: String? = nil
 
     var isShot: Bool { fileURL != nil }
@@ -228,8 +221,8 @@ struct FeedSpec {
 
     var aspect: CGFloat {
         if let fixedAspect { return fixedAspect }
-        guard let c = crop else { return 16.0 / 9.0 }
-        return (c.width * 2304.0) / (c.height * 1296.0)
+        guard let cropRect = crop else { return 16.0 / 9.0 }
+        return (cropRect.width * 2304.0) / (cropRect.height * 1296.0)
     }
 }
 
@@ -265,17 +258,22 @@ let allFeeds: [FeedSpec] = [
 ]
 let feedByID: [String: FeedSpec] = Dictionary(uniqueKeysWithValues: allFeeds.map { ($0.id, $0) })
 
-func cropImage(_ img: CGImage, _ r: CGRect?) -> CGImage {
-    guard let r else { return img }
-    let w = CGFloat(img.width), h = CGFloat(img.height)
-    let rect = CGRect(x: r.minX * w, y: r.minY * h, width: r.width * w, height: r.height * h).integral
-    return img.cropping(to: rect) ?? img
+func cropImage(_ sourceImage: CGImage, _ normalizedCrop: CGRect?) -> CGImage {
+    guard let normalizedCrop else { return sourceImage }
+    let imageWidth = CGFloat(sourceImage.width)
+    let imageHeight = CGFloat(sourceImage.height)
+    let cropRect = CGRect(
+        x: normalizedCrop.minX * imageWidth,
+        y: normalizedCrop.minY * imageHeight,
+        width: normalizedCrop.width * imageWidth,
+        height: normalizedCrop.height * imageHeight
+    ).integral
+    return sourceImage.cropping(to: cropRect) ?? sourceImage
 }
 
-// MARK: - Screenshots (⌘⇧3 / ⌘⇧4 / ⌘⇧5) hung on the line, like tendedero
+// MARK: - 系统截图目录接管与恢复
 
-/// Points the macOS screenshot service at our own folder while the app runs,
-/// and puts the user's settings back when it quits.
+/// 暂存并重定向系统截图目录以便退出恢复
 enum ScreenshotInbox {
     private static let domain = "com.apple.screencapture" as CFString
     private static let keys: [(name: String, key: CFString)] = [
@@ -305,8 +303,8 @@ enum ScreenshotInbox {
     }
 
     static var isApplied: Bool {
-        guard let cur = value("location" as CFString) as? String else { return false }
-        return URL(fileURLWithPath: (cur as NSString).expandingTildeInPath).standardizedFileURL.path
+        guard let currentPath = value("location" as CFString) as? String else { return false }
+        return URL(fileURLWithPath: (currentPath as NSString).expandingTildeInPath).standardizedFileURL.path
             == folder.standardizedFileURL.path
     }
 
@@ -314,22 +312,27 @@ enum ScreenshotInbox {
         let opId = TraceLogger.makeOperationId(prefix: "inbox")
         FileIO.ensureDirectory(folder, operationId: opId, context: "ScreenshotInbox.apply")
         if !isApplied {
-            // A Tendedero that is no longer running can leave screenshots pointed at its own
-            // hidden folder. That is not the user's own setting, so it is never what we restore.
-            let cur = (value("location" as CFString) as? String) ?? ""
+            // 排除残留目录避免恢复错误路径
+            let currentPath = (value("location" as CFString) as? String) ?? ""
             var saved: [String: Any] = [:]
-            if !cur.contains("/Tendedero/") {
-                for (name, key) in keys { if let v = value(key) { saved[name] = v } }
+            if !currentPath.contains("/Tendedero/") {
+                for (name, key) in keys {
+                    if let currentVal = value(key) { saved[name] = currentVal }
+                }
             }
             UserDefaults.standard.set(saved, forKey: savedKey)
         }
-        for k in ["location", "location-screenshot", "location-screenrecording"] { set(k as CFString, folder.path) }
-        for k in ["target", "target-screenshot", "target-screenrecording"] { set(k as CFString, "file") }
-        // No floating thumbnail: each capture hangs the instant it is taken.
+        for prefKey in ["location", "location-screenshot", "location-screenrecording"] {
+            set(prefKey as CFString, folder.path)
+        }
+        for prefKey in ["target", "target-screenshot", "target-screenrecording"] {
+            set(prefKey as CFString, "file")
+        }
+        // 关闭系统缩略图实现截图即刻上绳
         set("show-thumbnail" as CFString, false)
     }
 
-    /// Back to what the user had (or the macOS default: the Desktop).
+    /// 退出时恢复用户原系统截图路径
     static func restore() {
         guard isApplied else { return }
         let saved = UserDefaults.standard.dictionary(forKey: savedKey) ?? [:]
@@ -338,7 +341,7 @@ enum ScreenshotInbox {
     }
 }
 
-/// Watches the screenshot folder and reports each new capture.
+/// 监听目录事件实现新截图实时上绳
 final class ScreenshotWatcher {
     let folder: URL
     var onNew: ((URL) -> Void)?
@@ -354,13 +357,17 @@ final class ScreenshotWatcher {
         let opId = TraceLogger.makeOperationId(prefix: "watch")
         FileIO.ensureDirectory(folder, operationId: opId, context: "ScreenshotWatcher.start")
         known = Set(list().map { $0.lastPathComponent })
-        let fd = open(folder.path, O_EVTONLY)
-        guard fd >= 0 else { return }
-        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename], queue: .main)
-        src.setEventHandler { [weak self] in self?.scheduleScan() }
-        src.setCancelHandler { close(fd) }
-        src.resume()
-        source = src
+        let descriptor = open(folder.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let fsSource = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename],
+            queue: .main
+        )
+        fsSource.setEventHandler { [weak self] in self?.scheduleScan() }
+        fsSource.setCancelHandler { close(descriptor) }
+        fsSource.resume()
+        source = fsSource
     }
 
     func stop() {
@@ -369,9 +376,9 @@ final class ScreenshotWatcher {
     }
 
     private func list() -> [URL] {
-        let fm = FileManager.default
+        let fileManager = FileManager.default
         do {
-            let urls = try fm.contentsOfDirectory(
+            let urls = try fileManager.contentsOfDirectory(
                 at: folder,
                 includingPropertiesForKeys: [.creationDateKey],
                 options: [.skipsHiddenFiles]
@@ -413,32 +420,32 @@ final class ScreenshotWatcher {
 func isRecordingFile(_ url: URL) -> Bool { ["mov", "mp4"].contains(url.pathExtension.lowercased()) }
 
 private let shotTimeFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "HH:mm:ss"
-    return f
+    let formatter = DateFormatter()
+    formatter.dateFormat = "HH:mm:ss"
+    return formatter
 }()
 
 func makeThumbnail(_ url: URL) -> CGImage? {
     if isRecordingFile(url) {
-        let gen = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        gen.appliesPreferredTrackTransform = true
-        gen.maximumSize = CGSize(width: 700, height: 700)
-        let sem = DispatchSemaphore(value: 0)
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: 700, height: 700)
+        let semaphore = DispatchSemaphore(value: 0)
         var result: CGImage?
-        gen.generateCGImageAsynchronously(for: CMTime(seconds: 0.1, preferredTimescale: 600)) { img, _, _ in
-            result = img
-            sem.signal()
+        generator.generateCGImageAsynchronously(for: CMTime(seconds: 0.1, preferredTimescale: 600)) { image, _, _ in
+            result = image
+            semaphore.signal()
         }
-        _ = sem.wait(timeout: .now() + 1.5)
+        _ = semaphore.wait(timeout: .now() + 1.5)
         return result
     }
-    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    let opts: [CFString: Any] = [
+    guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
         kCGImageSourceCreateThumbnailFromImageAlways: true,
         kCGImageSourceThumbnailMaxPixelSize: 700,
         kCGImageSourceCreateThumbnailWithTransform: true,
     ]
-    return CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary)
+    return CGImageSourceCreateThumbnailAtIndex(imageSource, 0, options as CFDictionary)
 }
 
 func shotSpec(_ url: URL, thumb: CGImage) -> FeedSpec {
@@ -449,16 +456,16 @@ func shotSpec(_ url: URL, thumb: CGImage) -> FeedSpec {
     } catch {
         creationDate = Date()
     }
-    let rec = isRecordingFile(url)
-    return FeedSpec(id: "shot:" + url.path, title: (rec ? "录屏 " : "截图 ") + shotTimeFormatter.string(from: creationDate),
+    let recording = isRecordingFile(url)
+    return FeedSpec(id: "shot:" + url.path, title: (recording ? "录屏 " : "截图 ") + shotTimeFormatter.string(from: creationDate),
                     crop: nil, armKey: nil, ip: nil, accent: NSColor(white: 0.85, alpha: 1),
-                    fileURL: url, fixedAspect: aspect, isRecording: rec)
+                    fileURL: url, fixedAspect: aspect, isRecording: recording)
 }
 
-// MARK: - Live RTSP frame hub (ffmpeg → MJPEG pipe → CGImage)
+// MARK: - 实时视频帧拉取管道
 
 private func loadLocalStreamConfig(_ key: String, fallback: String) -> String {
-    if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty { return v }
+    if let envValue = ProcessInfo.processInfo.environment[key], !envValue.isEmpty { return envValue }
     let cfgFile = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/d1_clothesline/\(key)")
     guard FileManager.default.fileExists(atPath: cfgFile.path) else { return fallback }
@@ -524,13 +531,13 @@ final class FrameHub {
     }
 
     func restart() {
-        lock.lock(); let p = process; lock.unlock()
-        if let p, p.isRunning { p.terminate() }
+        lock.lock(); let activeProcess = process; lock.unlock()
+        if let activeProcess, activeProcess.isRunning { activeProcess.terminate() }
     }
 
     private func ffmpegPath() -> String {
-        for p in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
-        where FileManager.default.isExecutableFile(atPath: p) { return p }
+        for candidatePath in ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]
+        where FileManager.default.isExecutableFile(atPath: candidatePath) { return candidatePath }
         return "/opt/homebrew/bin/ffmpeg"
     }
 
@@ -543,17 +550,17 @@ final class FrameHub {
 
     private var processLaunchedAt = Date.distantPast
 
-    /// ffmpeg can stall silently when the camera drops the session; kill it so the loop reconnects.
+    /// 断流假死时强制终止触发重连
     private func watchdog() {
         while isRunning {
             Thread.sleep(forTimeInterval: 2.0)
             lock.lock()
-            let p = process
+            let activeProcess = process
             let launchedAt = processLaunchedAt
             let stale = Date().timeIntervalSince(_lastFrameAt) > 6
             lock.unlock()
-            if let p, p.isRunning, stale, Date().timeIntervalSince(launchedAt) > 8 {
-                p.terminate()
+            if let activeProcess, activeProcess.isRunning, stale, Date().timeIntervalSince(launchedAt) > 8 {
+                activeProcess.terminate()
             }
         }
     }
@@ -614,18 +621,18 @@ final class FrameHub {
 
             var latest: Data?
             while true {
-                guard let s = buffer.range(of: soi) else {
+                guard let startRange = buffer.range(of: soi) else {
                     if buffer.count > 2_000_000 { buffer.removeAll() }
                     break
                 }
-                let from = s.upperBound
+                let from = startRange.upperBound
                 guard from < buffer.endIndex,
-                      let e = buffer.range(of: eoi, options: [], in: from..<buffer.endIndex) else {
-                    if s.lowerBound > 0 { buffer.removeSubrange(0..<s.lowerBound) }
+                      let endRange = buffer.range(of: eoi, options: [], in: from..<buffer.endIndex) else {
+                    if startRange.lowerBound > 0 { buffer.removeSubrange(0..<startRange.lowerBound) }
                     break
                 }
-                latest = buffer.subdata(in: s.lowerBound..<e.upperBound)
-                buffer.removeSubrange(0..<e.upperBound)
+                latest = buffer.subdata(in: startRange.lowerBound..<endRange.upperBound)
+                buffer.removeSubrange(0..<endRange.upperBound)
             }
 
             guard let jpg = latest else { continue }
@@ -641,7 +648,7 @@ final class FrameHub {
     }
 }
 
-// MARK: - Arm telemetry (UDP :19001) + hub status (4gpu:8899)
+// MARK: - 机械臂遥测与中枢状态
 
 final class Telemetry {
     struct Hub {
@@ -678,15 +685,15 @@ final class Telemetry {
 
     func joints(_ key: String) -> [Double]? {
         lock.lock(); defer { lock.unlock() }
-        guard let s = seen[key], Date().timeIntervalSince(s) < 3 else { return nil }
+        guard let seenDate = seen[key], Date().timeIntervalSince(seenDate) < 3 else { return nil }
         return jointsByArm[key]
     }
 
     func hubState() -> Hub {
         lock.lock(); defer { lock.unlock() }
-        var h = hub
-        h.online = Date().timeIntervalSince(hubSeen) < 5
-        return h
+        var snapshot = hub
+        snapshot.online = Date().timeIntervalSince(hubSeen) < 5
+        return snapshot
     }
 
     private func loop() {
@@ -699,8 +706,8 @@ final class Telemetry {
         var tick = 0
         while isRunning {
             for spec in allFeeds {
-                guard let key = spec.armKey, let ip = spec.ip, let j = Self.queryArm(ip: ip) else { continue }
-                lock.lock(); jointsByArm[key] = j; seen[key] = Date(); lock.unlock()
+                guard let key = spec.armKey, let ip = spec.ip, let jointAngles = Self.queryArm(ip: ip) else { continue }
+                lock.lock(); jointsByArm[key] = jointAngles; seen[key] = Date(); lock.unlock()
             }
             if tick % 3 == 0, let url = statusURL {
                 session.dataTask(with: url) { [weak self] payloadData, _, err in
@@ -732,13 +739,13 @@ final class Telemetry {
         }
     }
 
-    /// Read-only `GET\n` query; this app never sends motion commands over UDP.
+    /// 只读查询绝不发送运动控制指令
     static func queryArm(ip: String, port: UInt16 = 19001) -> [Double]? {
-        let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        guard fd >= 0 else { return nil }
-        defer { close(fd) }
-        var tv = timeval(tv_sec: 0, tv_usec: 180_000)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        let socketFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard socketFd >= 0 else { return nil }
+        defer { close(socketFd) }
+        var timeoutVal = timeval(tv_sec: 0, tv_usec: 180_000)
+        setsockopt(socketFd, SOL_SOCKET, SO_RCVTIMEO, &timeoutVal, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
@@ -748,26 +755,26 @@ final class Telemetry {
         let sent = msg.withUnsafeBytes { buf -> Int in
             withUnsafePointer(to: &addr) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    sendto(fd, buf.baseAddress, buf.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    sendto(socketFd, buf.baseAddress, buf.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
         }
         guard sent > 0 else { return nil }
         var rbuf = [UInt8](repeating: 0, count: 256)
-        let n = recv(fd, &rbuf, rbuf.count - 1, 0)
-        guard n > 0 else { return nil }
-        let parts = String(decoding: rbuf.prefix(n), as: UTF8.self).split(whereSeparator: { $0.isWhitespace })
+        let bytesRead = recv(socketFd, &rbuf, rbuf.count - 1, 0)
+        guard bytesRead > 0 else { return nil }
+        let parts = String(decoding: rbuf.prefix(bytesRead), as: UTF8.self).split(whereSeparator: { $0.isWhitespace })
         guard parts.count >= 8, parts[0] == "OK" else { return nil }
         var vals: [Double] = []
-        for i in 1...7 {
-            guard let v = Double(parts[i]) else { return nil }
-            vals.append(v)
+        for partIndex in 1...7 {
+            guard let angleValue = Double(parts[partIndex]) else { return nil }
+            vals.append(angleValue)
         }
         return vals
     }
 }
 
-// MARK: - Insta360 X4 Air 360° Panorama & Rectilinear Pinhole Bridge
+// MARK: - 全景与针孔反投影桥接
 
 final class Insta360Hub {
     private let lock = NSLock()
@@ -933,7 +940,7 @@ final class Insta360Hub {
 }
 
 
-// MARK: - Layout
+// MARK: - 绳索与卡片几何布局
 
 enum Layout {
     static var scale: CGFloat { Settings.sizeScale }
@@ -945,10 +952,10 @@ enum Layout {
     static let ropeTop: CGFloat = 10
     static var panelHeight: CGFloat { ropeTop + 30 + cardHeight + 48 }
 
-    /// The rope hangs as a parabola from edge to edge of the screen.
+    /// 模拟悬链线自然下垂弧度
     static func sag(_ width: CGFloat) -> CGFloat { min(30, width * 0.018) }
 
-    /// Distance from the top of the panel down to the rope at `horizontalX`.
+    /// 计算横坐标处绳索下垂深度
     static func ropeDepth(atX horizontalX: CGFloat, width: CGFloat) -> CGFloat {
         guard width > 0 else { return ropeTop }
         let normalizedRatio = horizontalX / width
@@ -961,7 +968,7 @@ private let noImplicit: [String: CAAction] = [
     "frame": NSNull(), "hidden": NSNull(), "foregroundColor": NSNull(), "backgroundColor": NSNull(),
 ]
 
-// MARK: - A live video card pegged on the line
+// MARK: - 挂绳视频与截图卡片
 
 final class Card {
     let spec: FeedSpec
@@ -976,7 +983,7 @@ final class Card {
     private let staleText = CATextLayer()
     private let pin = CAGradientLayer()
     private let pinSlot = CALayer()
-    /// Every card hangs a little crooked, like on a real line.
+    /// 制造随机微倾还原真实悬挂感
     let tilt = CGFloat.random(in: -2.5...2.5) * .pi / 180
     private(set) var hovered = false
     private(set) var currentImage: CGImage?
@@ -1048,7 +1055,7 @@ final class Card {
         staleText.string = "正在连接视频流…"
         staleText.isHidden = true
 
-        // A minimal aluminium clip gripping the line.
+        // 金属夹子渐变强化悬挂支点视觉
         pin.colors = [NSColor(white: 0.70, alpha: 1).cgColor, NSColor(white: 0.93, alpha: 1).cgColor,
                       NSColor(white: 0.82, alpha: 1).cgColor, NSColor(white: 0.62, alpha: 1).cgColor]
         pin.locations = [0, 0.35, 0.65, 1]
@@ -1078,7 +1085,7 @@ final class Card {
         pin.addSublayer(pinSlot)
 
         if spec.isShot {
-            // A capture is shown whole, letterboxed, with a still badge instead of LIVE.
+            // 静态截图保留完整画幅不裁剪
             imageLayer.contentsGravity = .resizeAspect
             imageLayer.backgroundColor = NSColor(white: 0.12, alpha: 1).cgColor
             badgeDot.removeAnimation(forKey: "pulse")
@@ -1089,32 +1096,35 @@ final class Card {
         }
     }
 
-    /// Captures hang a little smaller than the live feeds.
+    /// 缩小截图尺寸突出实时视频流
     var photoH: CGFloat { spec.isShot ? (Layout.photoHeight * 0.82).rounded() : Layout.photoHeight }
     var cardH: CGFloat { photoH + Layout.inset * 2 + Layout.captionHeight }
     var width: CGFloat { (photoH * spec.aspect).rounded() + Layout.inset * 2 }
 
     func layout() {
-        let w = width, h = cardH, ins = Layout.inset, ph = photoH
-        holder.bounds = CGRect(x: 0, y: 0, width: w, height: h)
+        let cardWidth = width
+        let cardHeight = cardH
+        let inset = Layout.inset
+        let photoHeight = photoH
+        holder.bounds = CGRect(x: 0, y: 0, width: cardWidth, height: cardHeight)
         frameLayer.frame = holder.bounds
-        imageLayer.frame = CGRect(x: ins, y: ins + Layout.captionHeight, width: w - ins * 2, height: ph)
-        accentBar.frame = CGRect(x: ins + 6, y: ins + 5, width: 3, height: 11)
-        caption.frame = CGRect(x: ins + 12, y: ins + 3, width: w - ins * 2 - 18, height: 15)
-        staleText.frame = CGRect(x: 0, y: ph / 2 - 9, width: w - ins * 2, height: 18)
+        imageLayer.frame = CGRect(x: inset, y: inset + Layout.captionHeight, width: cardWidth - inset * 2, height: photoHeight)
+        accentBar.frame = CGRect(x: inset + 6, y: inset + 5, width: 3, height: 11)
+        caption.frame = CGRect(x: inset + 12, y: inset + 3, width: cardWidth - inset * 2 - 18, height: 15)
+        staleText.frame = CGRect(x: 0, y: photoHeight / 2 - 9, width: cardWidth - inset * 2, height: 18)
         layoutBadge()
-        // Clip top sits 12pt above the card, its slot right on the rope.
-        pin.frame = CGRect(x: w / 2 - 4.5, y: h - 14, width: 9, height: 26)
+        // 夹槽对齐绳索以保持摆动支点精准
+        pin.frame = CGRect(x: cardWidth / 2 - 4.5, y: cardHeight - 14, width: 9, height: 26)
         pinSlot.frame = CGRect(x: 2, y: 26 - 8.5 - 1.4, width: 5, height: 1.4)
     }
 
     private func layoutBadge() {
         let text = (badgeText.string as? String) ?? "LIVE"
-        let bw = CGFloat(text.count) * 5.9 + 22
-        let ph = photoH
-        badge.frame = CGRect(x: 6, y: ph - 6 - 13, width: bw, height: 13)
+        let badgeWidth = CGFloat(text.count) * 5.9 + 22
+        let photoHeight = photoH
+        badge.frame = CGRect(x: 6, y: photoHeight - 6 - 13, width: badgeWidth, height: 13)
         badgeDot.frame = CGRect(x: 6, y: 3, width: 7, height: 7)
-        badgeText.frame = CGRect(x: 16, y: 0.5, width: bw - 18, height: 12)
+        badgeText.frame = CGRect(x: 16, y: 0.5, width: badgeWidth - 18, height: 12)
     }
 
     func setImage(_ img: CGImage) {
@@ -1141,7 +1151,7 @@ final class Card {
         if stale { staleText.string = text }
     }
 
-    /// Shows a short confirmation in the caption, then puts the title back.
+    /// 短暂反馈操作成功随后恢复原标题
     func flashCaption(_ text: String) {
         let original = spec.title
         setCaption(text)
@@ -1153,7 +1163,7 @@ final class Card {
         }
     }
 
-    /// A new capture arrives from above and swings on its clip.
+    /// 新截图入场弹簧下落吸引注意
     func arrive() {
         let drop = CASpringAnimation(keyPath: "position.y")
         drop.fromValue = holder.position.y + 90
@@ -1173,8 +1183,8 @@ final class Card {
     }
 
     func applyTransform(animated: Bool) {
-        var t = CATransform3DMakeRotation(tilt, 0, 0, 1)
-        if hovered { t = CATransform3DScale(t, 1.06, 1.06, 1) }
+        var transform = CATransform3DMakeRotation(tilt, 0, 0, 1)
+        if hovered { transform = CATransform3DScale(transform, 1.06, 1.06, 1) }
         CATransaction.begin()
         if animated {
             CATransaction.setAnimationDuration(0.18)
@@ -1182,11 +1192,11 @@ final class Card {
         } else {
             CATransaction.setDisableActions(true)
         }
-        holder.transform = t
+        holder.transform = transform
         CATransaction.commit()
     }
 
-    /// Push it a little and let it swing back on its clip.
+    /// 模拟轻推阻尼摆动增强物理反馈
     func nudge(_ degrees: CGFloat, delay: CFTimeInterval = 0) {
         let rad = degrees * .pi / 180
         let t0 = CACurrentMediaTime() + delay
@@ -1210,7 +1220,7 @@ final class Card {
         holder.add(spring, forKey: "swing")
     }
 
-    /// Taken off the line: it drops away.
+    /// 移除卡片时播放脱钩坠落动画
     func fall(completion: @escaping () -> Void) {
         holder.removeAnimation(forKey: "swing")
         holder.removeAnimation(forKey: "swingPush")
@@ -1223,18 +1233,18 @@ final class Card {
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 1
         fade.toValue = 0
-        let g = CAAnimationGroup()
-        g.animations = [drop, spin, fade]
-        g.duration = 0.55
-        g.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        g.fillMode = .forwards
-        g.isRemovedOnCompletion = false
-        holder.add(g, forKey: "fall")
+        let animGroup = CAAnimationGroup()
+        animGroup.animations = [drop, spin, fade]
+        animGroup.duration = 0.55
+        animGroup.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        animGroup.fillMode = .forwards
+        animGroup.isRemovedOnCompletion = false
+        holder.add(animGroup, forKey: "fall")
         CATransaction.commit()
     }
 }
 
-// MARK: - Top Hover & Notch (灵动岛/刘海) Geometry
+// MARK: - 顶部与灵动岛几何判定
 
 struct TopHoverGeometry {
     struct ScreenMetrics {
@@ -1276,85 +1286,122 @@ struct TopHoverGeometry {
         }
     }
 
-    /// Inclusive boundary hit-test (`[minX, maxX] × [minY, maxY]`).
-    /// Standard `NSMouseInRect(..., false)` uses `x < maxX && y > minY` (missing `y == minY`
-    /// where macOS WindowServer clamps the cursor at the bottom edge of the Notch!),
-    /// while `CGRect.contains` uses `y < maxY` (missing `y == frame.maxY` at the very top pixel).
+    /// 闭区间命中兼容刘海下沿夹紧坐标
     static func pointInRectInclusive(
-        _ p: NSPoint,
-        _ r: NSRect,
+        _ cursorPoint: NSPoint,
+        _ targetRect: NSRect,
         expandX: CGFloat = 0,
         expandYBottom: CGFloat = 0,
         expandYTop: CGFloat = 0
     ) -> Bool {
-        guard r.width > 0, r.height >= 0 else { return false }
-        return p.x >= r.minX - expandX && p.x <= r.maxX + expandX
-            && p.y >= r.minY - expandYBottom && p.y <= r.maxY + expandYTop
+        guard targetRect.width > 0, targetRect.height >= 0 else { return false }
+        return cursorPoint.x >= targetRect.minX - expandX && cursorPoint.x <= targetRect.maxX + expandX
+            && cursorPoint.y >= targetRect.minY - expandYBottom && cursorPoint.y <= targetRect.maxY + expandYTop
     }
 
-    static func topBarHeight(for m: ScreenMetrics) -> CGFloat {
-        let menuGap = m.frame.maxY - m.visibleFrame.maxY
-        return max(menuGap, m.safeAreaTop, m.statusBarThickness, 24.0)
+    static func topBarHeight(for screenMetrics: ScreenMetrics) -> CGFloat {
+        let menuGap = screenMetrics.frame.maxY - screenMetrics.visibleFrame.maxY
+        return max(menuGap, screenMetrics.safeAreaTop, screenMetrics.statusBarThickness, 24.0)
     }
 
-    /// Exact or fallback central MacBook Notch (刘海/灵动岛) cutout rectangle.
-    static func notchRect(for m: ScreenMetrics) -> NSRect {
-        let h = topBarHeight(for: m)
-        if let left = m.auxiliaryTopLeftArea, let right = m.auxiliaryTopRightArea, right.minX > left.maxX {
-            return NSRect(x: left.maxX, y: m.frame.maxY - h, width: right.minX - left.maxX, height: h)
+    /// 计算或回退屏幕顶部中央刘海区域
+    static func notchRect(for screenMetrics: ScreenMetrics) -> NSRect {
+        let barHeight = topBarHeight(for: screenMetrics)
+        if let left = screenMetrics.auxiliaryTopLeftArea,
+           let right = screenMetrics.auxiliaryTopRightArea,
+           right.minX > left.maxX {
+            return NSRect(
+                x: left.maxX,
+                y: screenMetrics.frame.maxY - barHeight,
+                width: right.minX - left.maxX,
+                height: barHeight
+            )
         }
-        let halfW = max(110.0, min(160.0, m.frame.width * 0.08))
-        return NSRect(x: m.frame.midX - halfW, y: m.frame.maxY - h, width: halfW * 2, height: h)
+        let halfW = max(110.0, min(160.0, screenMetrics.frame.width * 0.08))
+        return NSRect(
+            x: screenMetrics.frame.midX - halfW,
+            y: screenMetrics.frame.maxY - barHeight,
+            width: halfW * 2,
+            height: barHeight
+        )
     }
 
-    /// Expanded trigger zone around and directly beneath the MacBook Notch / Dynamic Island.
-    /// Because macOS WindowServer blocks/clamps the pointer at the bottom edge of the physical
-    /// camera housing (`y == visibleFrame.maxY`), the trigger zone extends 36pt below `visibleFrame.maxY`
-    /// and 64pt to each side of the Notch so hovering anywhere on or under the black Notch triggers smoothly.
-    static func notchHotZone(for m: ScreenMetrics) -> NSRect {
-        let raw = notchRect(for: m)
+    /// 向下外扩热区解决刘海阻挡光标问题
+    static func notchHotZone(for screenMetrics: ScreenMetrics) -> NSRect {
+        let raw = notchRect(for: screenMetrics)
         let padX: CGFloat = 64.0
         let apronBelow: CGFloat = 36.0
-        let minX = max(m.frame.minX, raw.minX - padX)
-        let maxX = min(m.frame.maxX, raw.maxX + padX)
-        let baseMinY = min(m.visibleFrame.maxY, raw.minY)
-        let minY = max(m.frame.minY, baseMinY - apronBelow)
-        return NSRect(x: minX, y: minY, width: max(0, maxX - minX), height: max(0, m.frame.maxY - minY))
+        let minX = max(screenMetrics.frame.minX, raw.minX - padX)
+        let maxX = min(screenMetrics.frame.maxX, raw.maxX + padX)
+        let baseMinY = min(screenMetrics.visibleFrame.maxY, raw.minY)
+        let minY = max(screenMetrics.frame.minY, baseMinY - apronBelow)
+        return NSRect(
+            x: minX,
+            y: minY,
+            width: max(0, maxX - minX),
+            height: max(0, screenMetrics.frame.maxY - minY)
+        )
     }
 
-    /// Full-width menu bar trigger band with a 6pt bottom cushion so `y == visibleFrame.maxY` never misses.
-    static func menuBarBand(for m: ScreenMetrics) -> NSRect {
-        let h = topBarHeight(for: m)
-        let baseMinY = min(m.visibleFrame.maxY, m.frame.maxY - h)
-        let minY = max(m.frame.minY, baseMinY - 6.0)
-        return NSRect(x: m.frame.minX, y: minY, width: m.frame.width, height: max(0, m.frame.maxY - minY))
+    /// 菜单栏下延容差防止边界坐标漏判
+    static func menuBarBand(for screenMetrics: ScreenMetrics) -> NSRect {
+        let barHeight = topBarHeight(for: screenMetrics)
+        let baseMinY = min(screenMetrics.visibleFrame.maxY, screenMetrics.frame.maxY - barHeight)
+        let minY = max(screenMetrics.frame.minY, baseMinY - 6.0)
+        return NSRect(
+            x: screenMetrics.frame.minX,
+            y: minY,
+            width: screenMetrics.frame.width,
+            height: max(0, screenMetrics.frame.maxY - minY)
+        )
     }
 
-    static func isInNotchZone(_ p: NSPoint, metrics m: ScreenMetrics) -> Bool {
-        pointInRectInclusive(p, notchHotZone(for: m), expandX: 2.0, expandYBottom: 0.0, expandYTop: 4.0)
-    }
-
-    static func isInMenuBarBand(_ p: NSPoint, metrics m: ScreenMetrics) -> Bool {
-        pointInRectInclusive(p, menuBarBand(for: m), expandX: 2.0, expandYBottom: 0.0, expandYTop: 4.0)
-    }
-
-    static func isInTopTriggerZone(_ p: NSPoint, metrics m: ScreenMetrics) -> Bool {
-        isInNotchZone(p, metrics: m) || isInMenuBarBand(p, metrics: m)
-    }
-
-    static func expandedKeepOpenZone(panelFrame: NSRect, metrics m: ScreenMetrics) -> NSRect {
-        let minY = min(panelFrame.minY, m.visibleFrame.maxY - Layout.panelHeight)
-        return NSRect(x: m.frame.minX, y: minY, width: m.frame.width, height: max(0, m.frame.maxY - minY))
-    }
-
-    static func isInKeepOpenZone(_ p: NSPoint, panelFrame: NSRect, metrics m: ScreenMetrics) -> Bool {
+    static func isInNotchZone(_ cursorPoint: NSPoint, metrics screenMetrics: ScreenMetrics) -> Bool {
         pointInRectInclusive(
-            p,
-            expandedKeepOpenZone(panelFrame: panelFrame, metrics: m),
+            cursorPoint,
+            notchHotZone(for: screenMetrics),
+            expandX: 2.0,
+            expandYBottom: 0.0,
+            expandYTop: 4.0
+        )
+    }
+
+    static func isInMenuBarBand(_ cursorPoint: NSPoint, metrics screenMetrics: ScreenMetrics) -> Bool {
+        pointInRectInclusive(
+            cursorPoint,
+            menuBarBand(for: screenMetrics),
+            expandX: 2.0,
+            expandYBottom: 0.0,
+            expandYTop: 4.0
+        )
+    }
+
+    static func isInTopTriggerZone(_ cursorPoint: NSPoint, metrics screenMetrics: ScreenMetrics) -> Bool {
+        isInNotchZone(cursorPoint, metrics: screenMetrics) || isInMenuBarBand(cursorPoint, metrics: screenMetrics)
+    }
+
+    static func expandedKeepOpenZone(panelFrame: NSRect, metrics screenMetrics: ScreenMetrics) -> NSRect {
+        let minY = min(panelFrame.minY, screenMetrics.visibleFrame.maxY - Layout.panelHeight)
+        return NSRect(
+            x: screenMetrics.frame.minX,
+            y: minY,
+            width: screenMetrics.frame.width,
+            height: max(0, screenMetrics.frame.maxY - minY)
+        )
+    }
+
+    static func isInKeepOpenZone(
+        _ cursorPoint: NSPoint,
+        panelFrame: NSRect,
+        metrics screenMetrics: ScreenMetrics
+    ) -> Bool {
+        pointInRectInclusive(
+            cursorPoint,
+            expandedKeepOpenZone(panelFrame: panelFrame, metrics: screenMetrics),
             expandX: 4.0,
             expandYBottom: 6.0,
             expandYTop: 6.0
-        ) || isInTopTriggerZone(p, metrics: m)
+        ) || isInTopTriggerZone(cursorPoint, metrics: screenMetrics)
     }
 }
 
@@ -1453,7 +1500,7 @@ struct ClotheslineHoverController {
     }
 }
 
-// MARK: - The strip under the menu bar
+// MARK: - 顶栏下方悬浮晾衣绳面板
 
 final class LinePanel: NSPanel {
     init(content: NSView) {
@@ -1560,37 +1607,36 @@ final class ClotheslineView: NSView, NSDraggingSource {
 
     private var backingScale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
 
-    /// Replaces what hangs on the line. Cards already on it stay put (same clip,
-    /// same tilt); the rest slide over to make room. Returns the newly hung cards.
+    /// 复用已有卡片保持夹角并平滑移动位置
     @discardableResult
     func setFeeds(_ specs: [FeedSpec], animated: Bool = false) -> [Card] {
-        var old: [String: Card] = [:]
-        for c in cards { old[c.spec.id] = c }
+        var oldById: [String: Card] = [:]
+        for card in cards { oldById[card.spec.id] = card }
         let oldPositions = Dictionary(uniqueKeysWithValues: cards.map { ($0.spec.id, $0.holder.position) })
         var next: [Card] = []
         var fresh: [Card] = []
-        for s in specs {
-            if let c = old.removeValue(forKey: s.id) {
-                next.append(c)
+        for spec in specs {
+            if let existingCard = oldById.removeValue(forKey: spec.id) {
+                next.append(existingCard)
             } else {
-                let c = Card(spec: s, contentsScale: backingScale)
-                container.addSublayer(c.holder)
-                next.append(c)
-                fresh.append(c)
+                let newCard = Card(spec: spec, contentsScale: backingScale)
+                container.addSublayer(newCard.holder)
+                next.append(newCard)
+                fresh.append(newCard)
             }
         }
-        old.values.forEach { $0.holder.removeFromSuperlayer() }
+        oldById.values.forEach { $0.holder.removeFromSuperlayer() }
         cards = next
         relayout()
         if animated {
-            for c in cards {
-                guard let from = oldPositions[c.spec.id], from != c.holder.position else { continue }
-                let a = CABasicAnimation(keyPath: "position")
-                a.fromValue = NSValue(point: from)
-                a.toValue = NSValue(point: c.holder.position)
-                a.duration = 0.35
-                a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-                c.holder.add(a, forKey: "shift")
+            for card in cards {
+                guard let from = oldPositions[card.spec.id], from != card.holder.position else { continue }
+                let moveAnim = CABasicAnimation(keyPath: "position")
+                moveAnim.fromValue = NSValue(point: from)
+                moveAnim.toValue = NSValue(point: card.holder.position)
+                moveAnim.duration = 0.35
+                moveAnim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                card.holder.add(moveAnim, forKey: "shift")
             }
         }
         return fresh
@@ -1599,7 +1645,8 @@ final class ClotheslineView: NSView, NSDraggingSource {
     func relayout() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let W = bounds.width, H = bounds.height
+        let viewWidth = bounds.width
+        let viewHeight = bounds.height
         let savedTransform = container.transform
         container.transform = CATransform3DIdentity
         container.bounds = bounds
@@ -1608,10 +1655,10 @@ final class ClotheslineView: NSView, NSDraggingSource {
 
         let path = CGMutablePath()
         let steps = 96
-        for s in 0...steps {
-            let stepX = W * CGFloat(s) / CGFloat(steps)
-            let p = CGPoint(x: stepX, y: H - Layout.ropeDepth(atX: stepX, width: W))
-            if s == 0 { path.move(to: p) } else { path.addLine(to: p) }
+        for stepIdx in 0...steps {
+            let stepX = viewWidth * CGFloat(stepIdx) / CGFloat(steps)
+            let ropePoint = CGPoint(x: stepX, y: viewHeight - Layout.ropeDepth(atX: stepX, width: viewWidth))
+            if stepIdx == 0 { path.move(to: ropePoint) } else { path.addLine(to: ropePoint) }
         }
         rope.frame = container.bounds
         rope.path = path
@@ -1622,29 +1669,37 @@ final class ClotheslineView: NSView, NSDraggingSource {
         let sumW = widths.reduce(0, +)
         // 卡片过多时允许部分重叠防越界
         var gap = Layout.gap
-        let avail = W - 60
+        let avail = viewWidth - 60
         if cards.count > 1, sumW + gap * CGFloat(cards.count - 1) > avail {
             gap = (avail - sumW) / CGFloat(cards.count - 1)
         }
         let total = sumW + gap * CGFloat(max(0, cards.count - 1))
-        var cursorX = (W - total) / 2
-        for (i, card) in cards.enumerated() {
-            let w = widths[i]
-            let cx = cursorX + w / 2
+        var cursorX = (viewWidth - total) / 2
+        for (cardIndex, card) in cards.enumerated() {
+            let cardWidth = widths[cardIndex]
+            let centerX = cursorX + cardWidth / 2
             card.layout()
             // 锚点对齐挂绳底部槽位
-            card.holder.position = CGPoint(x: cx, y: H - Layout.ropeDepth(atX: cx, width: W) - 3.5)
+            card.holder.position = CGPoint(
+                x: centerX,
+                y: viewHeight - Layout.ropeDepth(atX: centerX, width: viewWidth) - 3.5
+            )
             card.applyTransform(animated: false)
-            cursorX += w + gap
+            cursorX += cardWidth + gap
         }
 
         hint.isHidden = !cards.isEmpty
         hint.contentsScale = backingScale
-        hint.frame = CGRect(x: 0, y: H - Layout.ropeDepth(atX: W / 2, width: W) - 34, width: W, height: 18)
+        hint.frame = CGRect(
+            x: 0,
+            y: viewHeight - Layout.ropeDepth(atX: viewWidth / 2, width: viewWidth) - 34,
+            width: viewWidth,
+            height: 18
+        )
         CATransaction.commit()
     }
 
-    /// Slide the whole line down out of the menu bar, or tuck it back up.
+    /// 整体平滑下放或收起回顶栏内部
     func setRevealed(_ on: Bool, animated: Bool) {
         let target = on ? CATransform3DIdentity : CATransform3DMakeTranslation(0, bounds.height, 0)
         let from = container.presentation()?.transform ?? container.transform
@@ -1653,40 +1708,49 @@ final class ClotheslineView: NSView, NSDraggingSource {
         container.transform = target
         CATransaction.commit()
         if animated {
-            let a = CABasicAnimation(keyPath: "transform")
-            a.fromValue = NSValue(caTransform3D: from)
-            a.toValue = NSValue(caTransform3D: target)
-            a.duration = on ? 0.46 : 0.26
-            a.timingFunction = on
+            let slideAnim = CABasicAnimation(keyPath: "transform")
+            slideAnim.fromValue = NSValue(caTransform3D: from)
+            slideAnim.toValue = NSValue(caTransform3D: target)
+            slideAnim.duration = on ? 0.46 : 0.26
+            slideAnim.timingFunction = on
                 ? CAMediaTimingFunction(controlPoints: 0.22, 1.28, 0.42, 1)
                 : CAMediaTimingFunction(name: .easeIn)
-            container.add(a, forKey: "slide")
+            container.add(slideAnim, forKey: "slide")
         }
         if on {
-            for (i, c) in cards.enumerated() {
-                c.nudge(CGFloat.random(in: 5...9) * (Bool.random() ? 1 : -1), delay: 0.14 + 0.06 * Double(i))
+            for (cardIndex, card) in cards.enumerated() {
+                card.nudge(
+                    CGFloat.random(in: 5...9) * (Bool.random() ? 1 : -1),
+                    delay: 0.14 + 0.06 * Double(cardIndex)
+                )
             }
         }
     }
 
     func breeze() {
-        for c in cards {
-            c.nudge(CGFloat.random(in: 1.6...3.4) * (Bool.random() ? 1 : -1), delay: Double.random(in: 0...0.35))
+        for card in cards {
+            card.nudge(
+                CGFloat.random(in: 1.6...3.4) * (Bool.random() ? 1 : -1),
+                delay: Double.random(in: 0...0.35)
+            )
         }
     }
 
-    func cardIndex(at p: NSPoint) -> Int? {
+    func cardIndex(at localPoint: NSPoint) -> Int? {
         // 优先命中当前悬停顶层卡片
-        if let h = cards.firstIndex(where: { $0.hovered }),
-           cards[h].holder.frame.insetBy(dx: -4, dy: -4).contains(p) { return h }
-        for (i, c) in cards.enumerated().reversed() where c.holder.frame.insetBy(dx: -4, dy: -4).contains(p) {
-            return i
+        if let hoveredIdx = cards.firstIndex(where: { $0.hovered }),
+           cards[hoveredIdx].holder.frame.insetBy(dx: -4, dy: -4).contains(localPoint) {
+            return hoveredIdx
+        }
+        for (cardIdx, card) in cards.enumerated().reversed()
+        where card.holder.frame.insetBy(dx: -4, dy: -4).contains(localPoint) {
+            return cardIdx
         }
         return nil
     }
 
     func setHovered(_ index: Int?) {
-        for (i, c) in cards.enumerated() { c.setHovered(i == index) }
+        for (cardIdx, card) in cards.enumerated() { card.setHovered(cardIdx == index) }
     }
 
     func screenRect(of card: Card) -> NSRect {
@@ -1694,7 +1758,7 @@ final class ClotheslineView: NSView, NSDraggingSource {
         return window.convertToScreen(convert(card.holder.frame, to: nil))
     }
 
-    // MARK: Mouse
+    // MARK: - 鼠标交互
 
     override func mouseDown(with event: NSEvent) {
         downIndex = cardIndex(at: convert(event.locationInWindow, from: nil))
@@ -1703,17 +1767,21 @@ final class ClotheslineView: NSView, NSDraggingSource {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let start = downPoint, let i = downIndex, !startedDrag else { return }
-        let p = event.locationInWindow
-        guard hypot(p.x - start.x, p.y - start.y) > 5 else { return }
+        guard let start = downPoint, let selectedIdx = downIndex, !startedDrag else { return }
+        let windowPoint = event.locationInWindow
+        guard hypot(windowPoint.x - start.x, windowPoint.y - start.y) > 5 else { return }
         startedDrag = true
-        let card = cards[i]
+        let card = cards[selectedIdx]
         guard let url = onDragExport?(card) else { return }
         let item = NSDraggingItem(pasteboardWriter: url as NSURL)
         let preview = card.currentImage.map { NSImage(cgImage: $0, size: .zero) }
-        let f = card.holder.frame
-        let photo = NSRect(x: f.minX + Layout.inset, y: f.minY + Layout.inset + Layout.captionHeight,
-                           width: f.width - Layout.inset * 2, height: card.photoH)
+        let holderFrame = card.holder.frame
+        let photo = NSRect(
+            x: holderFrame.minX + Layout.inset,
+            y: holderFrame.minY + Layout.inset + Layout.captionHeight,
+            width: holderFrame.width - Layout.inset * 2,
+            height: card.photoH
+        )
         item.setDraggingFrame(photo, contents: preview)
         let session = beginDraggingSession(with: [item], event: event, source: self)
         session.animatesToStartingPositionsOnCancelOrFail = true
@@ -1722,8 +1790,8 @@ final class ClotheslineView: NSView, NSDraggingSource {
 
     override func mouseUp(with event: NSEvent) {
         defer { downPoint = nil; downIndex = nil }
-        guard !startedDrag, let i = downIndex, i < cards.count else { return }
-        let card = cards[i]
+        guard !startedDrag, let selectedIdx = downIndex, selectedIdx < cards.count else { return }
+        let card = cards[selectedIdx]
         if event.clickCount >= 2 {
             clickTimer?.invalidate()
             clickTimer = nil
@@ -1733,23 +1801,23 @@ final class ClotheslineView: NSView, NSDraggingSource {
         card.nudge(3)
         clickTimer?.invalidate()
         let handler = onClickCard
-        let t = Timer(timeInterval: NSEvent.doubleClickInterval, repeats: false) { [weak self] _ in
+        let delayTimer = Timer(timeInterval: NSEvent.doubleClickInterval, repeats: false) { [weak self] _ in
             self?.clickTimer = nil
             handler?(card)
         }
-        RunLoop.main.add(t, forMode: .common)
-        clickTimer = t
+        RunLoop.main.add(delayTimer, forMode: .common)
+        clickTimer = delayTimer
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        guard let i = cardIndex(at: convert(event.locationInWindow, from: nil)),
-              let menu = onMenuForCard?(cards[i]) else { return }
+        guard let selectedIdx = cardIndex(at: convert(event.locationInWindow, from: nil)),
+              let menu = onMenuForCard?(cards[selectedIdx]) else { return }
         isShowingMenu = true
         NSMenu.popUpContextMenu(menu, with: event, for: self)
         isShowingMenu = false
     }
 
-    // MARK: NSDraggingSource
+    // MARK: - 拖拽导出代理
 
     func draggingSession(_ session: NSDraggingSession,
                          sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
@@ -1763,7 +1831,7 @@ final class ClotheslineView: NSView, NSDraggingSource {
     }
 }
 
-// MARK: - Pop-out live window
+// MARK: - 独立放大实时查看浮窗
 
 final class LiveZoomView: NSView {
     let imageLayer = CALayer()
@@ -1816,13 +1884,13 @@ final class ZoomPanel: NSPanel {
 
     init(spec: FeedSpec, from cardRect: NSRect) {
         feedID = spec.id
-        let w: CGFloat = spec.crop == nil ? 760 : 520
-        let h = (w / spec.aspect).rounded()
+        let panelWidth: CGFloat = spec.crop == nil ? 760 : 520
+        let panelHeight = (panelWidth / spec.aspect).rounded()
         let screen = NSScreen.screens.first { $0.frame.intersects(cardRect) } ?? NSScreen.main
         let vis = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let originX = min(max(cardRect.midX - w / 2, vis.minX + 8), vis.maxX - w - 8)
-        let originY = max(vis.minY + 8, cardRect.minY - h - 28)
-        let target = NSRect(x: originX, y: originY, width: w, height: h)
+        let originX = min(max(cardRect.midX - panelWidth / 2, vis.minX + 8), vis.maxX - panelWidth - 8)
+        let originY = max(vis.minY + 8, cardRect.minY - panelHeight - 28)
+        let target = NSRect(x: originX, y: originY, width: panelWidth, height: panelHeight)
 
         super.init(contentRect: target,
                    styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -1853,7 +1921,7 @@ final class ZoomPanel: NSPanel {
     }
 }
 
-// MARK: - Global hot key
+// MARK: - 全局快捷键注册
 
 final class HotKey {
     private var hotKeyRef: EventHotKeyRef?
@@ -1864,16 +1932,16 @@ final class HotKey {
         self.onTrigger = action
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         let userData = Unmanaged.passUnretained(self).toOpaque()
-        let s1 = InstallEventHandler(GetApplicationEventTarget(), { _, _, rawUserData -> OSStatus in
+        let installStatus = InstallEventHandler(GetApplicationEventTarget(), { _, _, rawUserData -> OSStatus in
             guard let rawUserData else { return noErr }
             let instance = Unmanaged<HotKey>.fromOpaque(rawUserData).takeUnretainedValue()
             DispatchQueue.main.async { instance.onTrigger() }
             return noErr
         }, 1, &spec, userData, &handlerRef)
-        guard s1 == noErr else { return nil }
-        let id = EventHotKeyID(signature: OSType(0x4431_4C4E), id: 1)
-        let s2 = RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &hotKeyRef)
-        guard s2 == noErr else { return nil }
+        guard installStatus == noErr else { return nil }
+        let hotKeyId = EventHotKeyID(signature: OSType(0x4431_4C4E), id: 1)
+        let registerStatus = RegisterEventHotKey(keyCode, modifiers, hotKeyId, GetApplicationEventTarget(), 0, &hotKeyRef)
+        guard registerStatus == noErr else { return nil }
     }
 
     deinit {
@@ -1897,7 +1965,7 @@ final class ClosureMenuItem: NSMenuItem {
     @objc private func fire() { handler() }
 }
 
-// MARK: - App
+// MARK: - 应用主代理
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
     var panel: LinePanel!
@@ -1922,7 +1990,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var lastHotZoneAt: Date?
     var awaySince: Date?
     var peekUntil = Date.distantPast
-    /// Opened with the shortcut or the menu: stays down until the pointer has been over it once.
+    /// 快捷键展开后等待光标进入再允许自动收起
     var heldUntilEnter = false
     var firstCollapseArmed: Bool {
         get { heldUntilEnter }
@@ -1935,7 +2003,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var frameTimes: [CFTimeInterval] = []
     var fps: Double = 0
 
-    /// Screenshots on the line (oldest first) and their thumbnails.
+    /// 缓存已挂截图及缩略图避免重复解码
     var shots: [FeedSpec] = []
     var shotThumbs: [String: CGImage] = [:]
     let watcher = ScreenshotWatcher(folder: ScreenshotInbox.folder)
@@ -1987,9 +2055,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         insta360.start()
 
-        let ws = NSWorkspace.shared.notificationCenter
+        let workspaceCenter = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
-            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            workspaceCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 self?.keepOnActiveSpace()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                     self?.keepOnActiveSpace()
@@ -2025,9 +2093,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 guard let card = self.lineView.cards.first(where: { $0.spec.id == "center_102" }) else { return }
                 self.toggleZoom(card)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    if let z = self.zooms[card.spec.id], let cv = z.contentView,
-                       let rep = cv.bitmapImageRepForCachingDisplay(in: cv.bounds) {
-                        cv.cacheDisplay(in: cv.bounds, to: rep)
+                    if let zoomPanel = self.zooms[card.spec.id], let contentView = zoomPanel.contentView,
+                       let rep = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) {
+                        contentView.cacheDisplay(in: contentView.bounds, to: rep)
                         if let pngBytes = rep.representation(using: .png, properties: [:]) {
                             FileIO.writeData(
                                 pngBytes,
@@ -2036,7 +2104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                                 context: "zoomSnapshot"
                             )
                         }
-                        z.close()
+                        zoomPanel.close()
                     }
                 }
             }
@@ -2058,7 +2126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         cleanUpForExit()
     }
 
-    /// Screenshots go back to where the user had them (the Desktop by default).
+    /// 退出前释放系统监听器并恢复原截图目录
     func cleanUpForExit() {
         guard !cleanedUp else { return }
         cleanedUp = true
@@ -2070,9 +2138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         hoverWakeupWorkItem = nil
         tuckOrderOutWorkItem?.cancel()
         tuckOrderOutWorkItem = nil
-        for m in clickMonitors { NSEvent.removeMonitor(m) }
+        for monitor in clickMonitors { NSEvent.removeMonitor(monitor) }
         clickMonitors.removeAll()
-        for m in mouseMoveMonitors { NSEvent.removeMonitor(m) }
+        for monitor in mouseMoveMonitors { NSEvent.removeMonitor(monitor) }
         mouseMoveMonitors.removeAll()
         if let token = activityToken {
             ProcessInfo.processInfo.endActivity(token)
@@ -2085,8 +2153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         insta360.stop()
     }
 
-    /// `kill` / `pkill` / logout never reach applicationWillTerminate, so the
-    /// screenshot settings are put back from a signal handler too.
+    /// 捕获终止信号确保非正常退出也能恢复配置
     func installSignalHandlers() {
         for ttySig in [SIGTTIN, SIGTTOU, SIGTSTP] {
             signal(ttySig, SIG_IGN)
@@ -2108,7 +2175,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return allFeeds.filter { !hidden.contains($0.id) }
     }
 
-    // MARK: Screenshots
+    // MARK: - 截图卡片管理
 
     func startScreenshots() {
         ScreenshotInbox.apply()
@@ -2121,7 +2188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         ScreenshotInbox.restore()
     }
 
-    /// Everything on the line: the live feeds, then the captures, newest on the right.
+    /// 实时流居左、新截图依次挂在右侧
     func lineSpecs() -> [FeedSpec] { visibleFeeds() + shots }
 
     @discardableResult
@@ -2129,9 +2196,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let fresh = lineView.setFeeds(lineSpecs(), animated: animated)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for c in lineView.cards where c.spec.isShot {
-            if let t = shotThumbs[c.spec.id] { c.setImage(t) }
-            c.setCaption(c.spec.title)
+        for card in lineView.cards where card.spec.isShot {
+            if let thumbImage = shotThumbs[card.spec.id] { card.setImage(thumbImage) }
+            card.setCaption(card.spec.title)
         }
         CATransaction.commit()
         if let img = latestFrame { applyFrame(img) }
@@ -2155,7 +2222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         saveShots()
     }
 
-    /// A new capture landed in the folder: hang it and bring the line down for a moment.
+    /// 新截图落盘后自动挂绳并短暂滑出展示
     func hangCapture(_ url: URL, attempt: Int) {
         guard let thumb = makeThumbnail(url) else {
             // 文件尚未落盘完成时延迟重试
@@ -2186,17 +2253,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func copyShot(_ card: Card) {
         guard let url = card.spec.fileURL else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
         if card.spec.isRecording {
-            pb.writeObjects([url as NSURL])
+            pasteboard.writeObjects([url as NSURL])
         } else if let img = NSImage(contentsOf: url) {
-            pb.writeObjects([img, url as NSURL])
+            pasteboard.writeObjects([img, url as NSURL])
         }
         card.flashCaption("已拷贝 ✓")
     }
 
-    /// Takes a capture off the line. `trash` also moves the file to the Trash.
+    /// 取下截图卡片并按需移入系统废纸篓
     func letGo(_ card: Card, trash: Bool) {
         guard let url = card.spec.fileURL else { return }
         shots.removeAll { $0.id == card.spec.id }
@@ -2214,14 +2281,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func shotMenu(for card: Card) -> NSMenu {
-        let m = NSMenu()
-        guard let url = card.spec.fileURL else { return m }
-        m.addItem(ClosureMenuItem("拷贝") { [weak self] in self?.copyShot(card) })
-        m.addItem(ClosureMenuItem(card.spec.isRecording ? "用 QuickTime 播放" : "用预览打开") {
+        let menuObj = NSMenu()
+        guard let url = card.spec.fileURL else { return menuObj }
+        menuObj.addItem(ClosureMenuItem("拷贝") { [weak self] in self?.copyShot(card) })
+        menuObj.addItem(ClosureMenuItem(card.spec.isRecording ? "用 QuickTime 播放" : "用预览打开") {
             NSWorkspace.shared.open(url)
         })
-        m.addItem(ClosureMenuItem("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) })
-        m.addItem(ClosureMenuItem("存到桌面") {
+        menuObj.addItem(ClosureMenuItem("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([url]) })
+        menuObj.addItem(ClosureMenuItem("存到桌面") {
             let desk = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop")
             let dest = desk.appendingPathComponent(url.lastPathComponent)
             do {
@@ -2236,45 +2303,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 )
             }
         })
-        m.addItem(.separator())
-        m.addItem(ClosureMenuItem("从晾衣绳上取下（文件保留）") { [weak self] in self?.letGo(card, trash: false) })
-        m.addItem(ClosureMenuItem("扔掉（移到废纸篓）") { [weak self] in self?.letGo(card, trash: true) })
-        m.addItem(ClosureMenuItem("收下所有截图") { [weak self] in self?.clearShots() })
-        m.addItem(.separator())
-        m.addItem(ClosureMenuItem("一直晾着（不自动收起）", state: Settings.pinned ? .on : .off) { [weak self] in
+        menuObj.addItem(.separator())
+        menuObj.addItem(ClosureMenuItem("从晾衣绳上取下（文件保留）") { [weak self] in self?.letGo(card, trash: false) })
+        menuObj.addItem(ClosureMenuItem("扔掉（移到废纸篓）") { [weak self] in self?.letGo(card, trash: true) })
+        menuObj.addItem(ClosureMenuItem("收下所有截图") { [weak self] in self?.clearShots() })
+        menuObj.addItem(.separator())
+        menuObj.addItem(ClosureMenuItem("一直晾着（不自动收起）", state: Settings.pinned ? .on : .off) { [weak self] in
             self?.togglePinned()
         })
-        m.addItem(ClosureMenuItem("退出 D1 视频晾衣绳") { NSApp.terminate(nil) })
-        return m
+        menuObj.addItem(ClosureMenuItem("退出 D1 视频晾衣绳") { NSApp.terminate(nil) })
+        return menuObj
     }
 
-    // MARK: Frames & captions
+    // 实时帧与遥测同步刷新
 
-    func handleFrame(_ img: CGImage) {
-        // 2 秒滑窗平滑突发管道帧率
+    func handleFrame(_ frameImage: CGImage) {
+        // 2秒滑窗平滑突发帧率
         let now = CACurrentMediaTime()
         frameTimes.append(now)
         while let first = frameTimes.first, now - first > 2.0 { frameTimes.removeFirst() }
         if frameTimes.count > 1, let first = frameTimes.first, now - first > 0.5 {
             fps = Double(frameTimes.count - 1) / (now - first)
         }
-        latestFrame = img
-        applyFrame(img)
+        latestFrame = frameImage
+        applyFrame(frameImage)
         refreshCaptions()
     }
 
-    func applyFrame(_ img: CGImage) {
+    func applyFrame(_ frameImage: CGImage) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if panel?.isVisible == true, let cards = lineView?.cards {
-            for c in cards where !c.spec.isShot && !c.spec.isInsta360 {
-                c.setImage(cropImage(img, c.spec.crop))
-                c.setStale(false, text: "")
+            for cardItem in cards where !cardItem.spec.isShot && !cardItem.spec.isInsta360 {
+                cardItem.setImage(cropImage(frameImage, cardItem.spec.crop))
+                cardItem.setStale(false, text: "")
             }
         }
-        for (id, z) in zooms {
-            if let spec = feedByID[id], !spec.isInsta360 {
-                z.zoomView.setImage(cropImage(img, spec.crop))
+        for (feedId, zoomPanel) in zooms {
+            if let spec = feedByID[feedId], !spec.isInsta360 {
+                zoomPanel.zoomView.setImage(cropImage(frameImage, spec.crop))
             }
         }
         CATransaction.commit()
@@ -2284,14 +2351,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         guard let cards = lineView?.cards else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for c in cards where c.spec.isInsta360 {
-            if let key = c.spec.insta360Key, let img = insta360.image(for: key) {
-                c.setImage(img)
+        for cardItem in cards where cardItem.spec.isInsta360 {
+            if let key = cardItem.spec.insta360Key, let img = insta360.image(for: key) {
+                cardItem.setImage(img)
             }
         }
-        for (id, z) in zooms {
-            if let spec = feedByID[id], let key = spec.insta360Key, let img = insta360.image(for: key) {
-                z.zoomView.setImage(img)
+        for (feedId, zoomPanel) in zooms {
+            if let spec = feedByID[feedId], let key = spec.insta360Key, let img = insta360.image(for: key) {
+                zoomPanel.zoomView.setImage(img)
             }
         }
         CATransaction.commit()
@@ -2299,43 +2366,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func shortCaption(_ spec: FeedSpec) -> String {
         if let key = spec.insta360Key {
-            let st = insta360.status()
+            let instaStatus = insta360.status()
             if key == "pano" {
-                return String(format: "%@ · 30fps · %dms", spec.title, st.ageMs)
+                return String(format: "%@ · 30fps · %dms", spec.title, instaStatus.ageMs)
             } else {
-                return String(format: "%@ · Z净空 %.1fmm", spec.title, st.zClearanceMm)
+                return String(format: "%@ · Z净空 %.1fmm", spec.title, instaStatus.zClearanceMm)
             }
         }
         if let key = spec.armKey {
-            guard let j = telemetry.joints(key) else { return "\(spec.title) · 遥测离线" }
-            return String(format: "%@  J0 %.0f°  爪 %.0f°", spec.title, j[0], j[6])
+            guard let jointAngles = telemetry.joints(key) else { return "\(spec.title) · 遥测离线" }
+            return String(format: "%@  J0 %.0f°  爪 %.0f°", spec.title, jointAngles[0], jointAngles[6])
         }
-        let h = telemetry.hubState()
-        guard h.online else { return "\(spec.title) · 1F 工位" }
-        return h.continuous ? "\(spec.title) · 24/7 作业 #\(h.cycle)" : "\(spec.title) · 待命 #\(h.cycle)"
+        let hubStatus = telemetry.hubState()
+        guard hubStatus.online else { return "\(spec.title) · 1F 工位" }
+        return hubStatus.continuous ? "\(spec.title) · 24/7 作业 #\(hubStatus.cycle)" : "\(spec.title) · 待命 #\(hubStatus.cycle)"
     }
 
     func longCaption(_ spec: FeedSpec) -> String {
         if let key = spec.insta360Key {
-            let st = insta360.status()
+            let instaStatus = insta360.status()
             if key == "pano" {
                 return String(format: "Insta360 X4 Air 360° 全景 (10.10.137.106) · 1920×960@30fps · 帧 #%d · 延迟 %dms",
-                              st.frames, st.ageMs)
+                              instaStatus.frames, instaStatus.ageMs)
             } else {
                 return String(format: "Insta360 球心针孔反投影无畸变侧视 · 1440×900 · 三臂 Z 净空 %.1f / 92.0 / 95.0 mm",
-                              st.zClearanceMm)
+                              instaStatus.zClearanceMm)
             }
         }
         if let key = spec.armKey {
-            guard let j = telemetry.joints(key) else { return "\(spec.title) (\(spec.ip ?? "")) · 遥测离线" }
-            let js = j.prefix(6).enumerated().map { String(format: "J%d %.0f°", $0.offset, $0.element) }.joined(separator: " ")
-            return String(format: "%@ · %@ · 夹爪 %.0f°", spec.title, js, j[6])
+            guard let jointAngles = telemetry.joints(key) else { return "\(spec.title) (\(spec.ip ?? "")) · 遥测离线" }
+            let jointSummary = jointAngles.prefix(6).enumerated().map {
+                String(format: "J%d %.0f°", $0.offset, $0.element)
+            }.joined(separator: " ")
+            return String(format: "%@ · %@ · 夹爪 %.0f°", spec.title, jointSummary, jointAngles[6])
         }
-        let h = telemetry.hubState()
-        let src = Settings.hd ? "RTSP 超清" : "RTSP 流畅"
-        guard h.online else { return String(format: "全景俯视 · %@ · %.1f FPS", src, fps) }
-        return String(format: "%@ · %.1f FPS · %@ #%d · %@ · %@", src, fps,
-                      h.continuous ? "24/7" : "待命", h.cycle, h.skill, h.phase)
+        let hubStatus = telemetry.hubState()
+        let streamSourceLabel = Settings.hd ? "RTSP 超清" : "RTSP 流畅"
+        guard hubStatus.online else { return String(format: "全景俯视 · %@ · %.1f FPS", streamSourceLabel, fps) }
+        return String(format: "%@ · %.1f FPS · %@ #%d · %@ · %@", streamSourceLabel, fps,
+                      hubStatus.continuous ? "24/7" : "待命", hubStatus.cycle, hubStatus.skill, hubStatus.phase)
     }
 
     func refreshCaptions() {
@@ -2345,31 +2414,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let instaSt = insta360.status()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for c in cards where !c.spec.isShot {
-            c.setCaption(shortCaption(c.spec))
-            if let key = c.spec.insta360Key {
+        for cardItem in cards where !cardItem.spec.isShot {
+            cardItem.setCaption(shortCaption(cardItem.spec))
+            if let key = cardItem.spec.insta360Key {
                 let hasImg = insta360.image(for: key) != nil
-                c.setStale(!hasImg, text: "连接 Insta360 (10.10.137.106)…")
-                c.setBadge(instaSt.online ? "360° 30fps" : "CACHED", live: instaSt.online)
+                cardItem.setStale(!hasImg, text: "连接 Insta360 (10.10.137.106)…")
+                cardItem.setBadge(instaSt.online ? "360° 30fps" : "CACHED", live: instaSt.online)
             } else {
-                c.setStale(stale, text: staleText)
-                if c.spec.crop == nil {
+                cardItem.setStale(stale, text: staleText)
+                if cardItem.spec.crop == nil {
                     let shownFps = fps >= 1.0 ? fps : 20.0
-                    c.setBadge(stale ? "OFFLINE" : String(format: "LIVE %.0ffps", shownFps), live: !stale)
+                    cardItem.setBadge(stale ? "OFFLINE" : String(format: "LIVE %.0ffps", shownFps), live: !stale)
                 } else {
-                    c.setBadge(stale ? "OFFLINE" : "LIVE", live: !stale)
+                    cardItem.setBadge(stale ? "OFFLINE" : "LIVE", live: !stale)
                 }
             }
         }
-        for (id, z) in zooms {
-            if let spec = feedByID[id] { z.zoomView.setCaption(longCaption(spec)) }
+        for (feedId, zoomPanel) in zooms {
+            if let spec = feedByID[feedId] { zoomPanel.zoomView.setCaption(longCaption(spec)) }
         }
         CATransaction.commit()
     }
 
-    // MARK: Reveal / tuck (tendedero behaviour + Notch / 灵动岛 support)
+    // 灵动岛悬停收放控制
 
-    /// Recreate the panel if macOS left it bound to a previous Space (#80).
+    /// 重建窗口防跨空间残留
     func keepOnActiveSpace() {
         guard isRevealed, panel != nil, panel.isVisible, !panel.isOnActiveSpace else { return }
         let old = panel!
@@ -2391,8 +2460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         tuckOrderOutWorkItem = nil
         hoverWakeupWorkItem?.cancel()
         hoverWakeupWorkItem = nil
-        if isRevealed, let w = panel, !w.isVisible {
-            w.orderFrontRegardless()
+        if isRevealed, let currentPanel = panel, !currentPanel.isVisible {
+            currentPanel.orderFrontRegardless()
             lineView?.setRevealed(true, animated: false)
             return
         }
@@ -2460,18 +2529,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func startTick() {
-        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.tick() }
-        t.tolerance = 0.005
-        RunLoop.main.add(t, forMode: .common)
-        mouseTimer = t
+        let pollTimer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.tick() }
+        pollTimer.tolerance = 0.005
+        RunLoop.main.add(pollTimer, forMode: .common)
+        mouseTimer = pollTimer
     }
 
     func tick() {
         pollMouse()
     }
 
-    /// Global & local mouse-move monitors ensure instant response even if the cursor stops
-    /// right after hitting the Notch (灵动岛/刘海) or top screen edge.
+    /// 双监听保触顶停驻即响应
     func watchMouseMovement() {
         let handler: (NSEvent) -> Void = { [weak self] _ in
             guard let self else { return }
@@ -2505,7 +2573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
-    /// Evaluates mouse position against the MacBook Notch (灵动岛/刘海), menu bar, and open clothesline panel.
+    /// 评估光标触发与自动收起
     func pollMouse(
         at mouse: NSPoint = NSEvent.mouseLocation,
         now: Date = Date(),
@@ -2514,7 +2582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         pressedButtons: Int = NSEvent.pressedMouseButtons
     ) {
         // 窗口被系统隐藏时同步状态
-        if isRevealed, metricsOverride == nil, let w = panel, !w.isVisible, tuckOrderOutWorkItem == nil {
+        if isRevealed, metricsOverride == nil, let currentPanel = panel, !currentPanel.isVisible, tuckOrderOutWorkItem == nil {
             isRevealed = false
         }
 
@@ -2583,8 +2651,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
     }
 
-    /// The strip spans the whole screen width, so it only takes the mouse
-    /// while the pointer is over a video card. Everywhere else clicks pass through.
+    /// 仅卡片区拦截鼠标防遮挡
     func updatePassThrough(_ mouse: NSPoint) {
         guard !lineView.isDragging else { return }
         let local = panel.convertPoint(fromScreen: mouse)
@@ -2594,14 +2661,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         lineView.setHovered(lineView.isShowingMenu ? nil : idx)
     }
 
-    /// A click in the left/right menu bar wings puts the line away (unless pinned),
-    /// whereas clicking the central Notch (灵动岛) reveals the line if tucked.
+    /// 点灵动岛展开点菜单收起
     func watchMenuBarClicks() {
         let handler: (NSEvent) -> Void = { [weak self] _ in
             guard let self else { return }
-            let p = NSEvent.mouseLocation
-            guard let screen = NSScreen.screens.first(where: { Self.isInTopTriggerZone(p, on: $0) }) else { return }
-            if Self.isInNotchZone(p, on: screen) {
+            let cursorPoint = NSEvent.mouseLocation
+            guard let screen = NSScreen.screens.first(where: { Self.isInTopTriggerZone(cursorPoint, on: $0) }) else { return }
+            if Self.isInNotchZone(cursorPoint, on: screen) {
                 self.menuBarSuppressed = false
                 self.suppressedAtPoint = nil
                 if !self.isRevealed && Settings.hoverReveal {
@@ -2613,56 +2679,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 return
             }
             self.menuBarSuppressed = true
-            self.suppressedAtPoint = p
+            self.suppressedAtPoint = cursorPoint
             self.hotZoneSince = nil
             self.lastHotZoneAt = nil
             if self.isRevealed && !Settings.pinned { self.tuck() }
         }
-        if let g = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: handler) {
-            clickMonitors.append(g)
+        if let globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown],
+            handler: handler
+        ) {
+            clickMonitors.append(globalClickMonitor)
         }
-        if let l = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { e in
-            handler(e)
-            return e
-        }) {
-            clickMonitors.append(l)
+        if let localClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown],
+            handler: { mouseEvent in
+                handler(mouseEvent)
+                return mouseEvent
+            }
+        ) {
+            clickMonitors.append(localClickMonitor)
         }
     }
 
     func scheduleBreeze() {
         breezeTimer?.invalidate()
-        let t = Timer(timeInterval: Double.random(in: 7...14), repeats: false) { [weak self] _ in
+        let nextTimer = Timer(timeInterval: Double.random(in: 7...14), repeats: false) { [weak self] _ in
             guard let self else { return }
             if self.isRevealed { self.lineView.breeze() }
             self.scheduleBreeze()
         }
-        RunLoop.main.add(t, forMode: .common)
-        breezeTimer = t
+        RunLoop.main.add(nextTimer, forMode: .common)
+        breezeTimer = nextTimer
     }
 
-    // MARK: Card actions
+    // 卡片放大截帧与菜单操作
 
     func toggleZoom(_ card: Card) {
-        if let z = zooms[card.spec.id] {
-            z.close()
+        if let existingZoom = zooms[card.spec.id] {
+            existingZoom.close()
             return
         }
-        let z = ZoomPanel(spec: card.spec, from: lineView.screenRect(of: card))
-        z.delegate = self
-        zooms[card.spec.id] = z
+        let zoomPanel = ZoomPanel(spec: card.spec, from: lineView.screenRect(of: card))
+        zoomPanel.delegate = self
+        zooms[card.spec.id] = zoomPanel
         frames.needsFrames = true
         insta360.needsFrames = true
         if let key = card.spec.insta360Key, let img = insta360.image(for: key) {
-            z.zoomView.setImage(img)
+            zoomPanel.zoomView.setImage(img)
         } else if let img = latestFrame {
-            z.zoomView.setImage(cropImage(img, card.spec.crop))
+            zoomPanel.zoomView.setImage(cropImage(img, card.spec.crop))
         }
-        z.zoomView.setCaption(longCaption(card.spec))
+        zoomPanel.zoomView.setCaption(longCaption(card.spec))
     }
 
     func windowWillClose(_ notification: Notification) {
-        guard let z = notification.object as? ZoomPanel else { return }
-        zooms[z.feedID] = nil
+        guard let zoomPanel = notification.object as? ZoomPanel else { return }
+        zooms[zoomPanel.feedID] = nil
     }
 
     func openMonitorApp() {
@@ -2670,15 +2742,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private static let fileStampFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyyMMdd_HHmmss"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd_HHmmss"
+        return formatter
     }()
 
     private static let captureStampFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        return f
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return formatter
     }()
 
     func timestamp() -> String {
@@ -2718,9 +2790,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             targetImg = nil
         }
         guard let cg = targetImg else { return }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects([NSImage(cgImage: cg, size: .zero)])
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([NSImage(cgImage: cg, size: .zero)])
     }
 
     func takeDown(_ card: Card) {
@@ -2759,29 +2831,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     func menu(for card: Card) -> NSMenu {
         if card.spec.isShot { return shotMenu(for: card) }
-        let m = NSMenu()
+        let cardMenu = NSMenu()
         let spec = card.spec
-        m.addItem(ClosureMenuItem(zooms[spec.id] == nil ? "放大实时查看（弹出浮窗）" : "关闭放大浮窗") { [weak self] in
+        cardMenu.addItem(ClosureMenuItem(zooms[spec.id] == nil ? "放大实时查看（弹出浮窗）" : "关闭放大浮窗") { [weak self] in
             self?.toggleZoom(card)
         })
         if spec.isInsta360 {
-            m.addItem(ClosureMenuItem("立即刷新 Insta360 360° 全景与无畸变侧视") { [weak self] in
+            cardMenu.addItem(ClosureMenuItem("立即刷新 Insta360 360° 全景与无畸变侧视") { [weak self] in
                 self?.insta360.triggerRefresh()
             })
         }
-        m.addItem(ClosureMenuItem("拷贝这一帧") { [weak self] in self?.copyFrame(spec) })
-        m.addItem(ClosureMenuItem("保存这一帧到 runs/snapshots") { [weak self] in
+        cardMenu.addItem(ClosureMenuItem("拷贝这一帧") { [weak self] in self?.copyFrame(spec) })
+        cardMenu.addItem(ClosureMenuItem("保存这一帧到 runs/snapshots") { [weak self] in
             if let url = self?.writeSnapshot(spec: spec) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
         })
-        m.addItem(ClosureMenuItem("从晾衣绳上取下") { [weak self] in self?.takeDown(card) })
-        m.addItem(.separator())
-        m.addItem(ClosureMenuItem("一直晾着（不自动收起）", state: Settings.pinned ? .on : .off) { [weak self] in
+        cardMenu.addItem(ClosureMenuItem("从晾衣绳上取下") { [weak self] in self?.takeDown(card) })
+        cardMenu.addItem(.separator())
+        cardMenu.addItem(ClosureMenuItem("一直晾着（不自动收起）", state: Settings.pinned ? .on : .off) { [weak self] in
             self?.togglePinned()
         })
-        m.addItem(ClosureMenuItem("打开 D1 实时监控浮窗") { [weak self] in self?.openMonitorApp() })
-        m.addItem(.separator())
-        m.addItem(ClosureMenuItem("退出 D1 视频晾衣绳") { NSApp.terminate(nil) })
-        return m
+        cardMenu.addItem(ClosureMenuItem("打开 D1 实时监控浮窗") { [weak self] in self?.openMonitorApp() })
+        cardMenu.addItem(.separator())
+        cardMenu.addItem(ClosureMenuItem("退出 D1 视频晾衣绳") { NSApp.terminate(nil) })
+        return cardMenu
     }
 
     func togglePinned() {
@@ -2793,7 +2865,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         updateStatusTitle()
     }
 
-    // MARK: Status bar menu
+    // 状态栏菜单装配与更新
 
     func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -2830,11 +2902,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         })
         menu.addItem(ClosureMenuItem("框选截一张图") {
             let url = ScreenshotInbox.folder.appendingPathComponent("截屏 \(Self.captureStamp()).png")
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-            p.arguments = ["-i", url.path]
+            let captureProcess = Process()
+            captureProcess.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            captureProcess.arguments = ["-i", url.path]
             do {
-                try p.run()
+                try captureProcess.run()
             } catch {
                 TraceLogger.warn(
                     operationId: TraceLogger.makeOperationId(prefix: "sc"),
@@ -2871,9 +2943,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         menu.addItem(feedsItem)
 
         let sizes = NSMenu()
-        for (title, s) in [("小", CGFloat(0.8)), ("中", CGFloat(1.0)), ("大", CGFloat(1.35)), ("特大", CGFloat(1.7))] {
-            sizes.addItem(ClosureMenuItem(title, state: abs(Settings.sizeScale - s) < 0.01 ? .on : .off) { [weak self] in
-                self?.setSize(s)
+        for (title, scaleOption) in [("小", CGFloat(0.8)), ("中", CGFloat(1.0)), ("大", CGFloat(1.35)), ("特大", CGFloat(1.7))] {
+            sizes.addItem(ClosureMenuItem(title, state: abs(Settings.sizeScale - scaleOption) < 0.01 ? .on : .off) { [weak self] in
+                self?.setSize(scaleOption)
             })
         }
         let sizeItem = NSMenuItem(title: "尺寸", action: nil, keyEquivalent: "")
@@ -2915,22 +2987,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         captureStampFormatter.string(from: Date())
     }
 
-    // MARK: Debug snapshot
+    // 离线导出合成调试快照
 
     func exportDebugSnapshot() {
         guard let root = lineView.layer else { return }
         let scale: CGFloat = 2
         let size = lineView.bounds.size
-        let w = Int(size.width * scale), h = Int(size.height * scale)
-        guard w > 0, h > 0,
-              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+        let pixelWidth = Int(size.width * scale)
+        let pixelHeight = Int(size.height * scale)
+        guard pixelWidth > 0, pixelHeight > 0,
+              let ctx = CGContext(data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpaceCreateDeviceRGB(),
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
         ctx.scaleBy(x: scale, y: scale)
         let colors = [NSColor(calibratedRed: 0.30, green: 0.42, blue: 0.62, alpha: 1).cgColor,
                       NSColor(calibratedRed: 0.62, green: 0.50, blue: 0.70, alpha: 1).cgColor] as CFArray
-        if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
-            ctx.drawLinearGradient(g, start: CGPoint(x: 0, y: size.height), end: CGPoint(x: size.width, y: 0), options: [])
+        if let bgGradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+            ctx.drawLinearGradient(bgGradient, start: CGPoint(x: 0, y: size.height), end: CGPoint(x: size.width, y: 0), options: [])
         }
         root.render(in: ctx)
         guard let img = ctx.makeImage(),
@@ -2944,7 +3017,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 }
 
-// MARK: - Automated Self-Test
+// 内置几何与状态机自测
 
 func runSelfTests() -> Int32 {
     var failures: [String] = []
@@ -2974,7 +3047,7 @@ func runSelfTests() -> Int32 {
     check(TopHoverGeometry.isInNotchZone(NSPoint(x: 864, y: 1117.5), metrics: mbp16),
           "Cursor with subpixel top overshoot (864, 1117.5) hits notchHotZone")
 
-    // WindowServer 在刘海下沿夹紧坐标
+    // 刘海下沿坐标夹紧验证
     check(TopHoverGeometry.isInNotchZone(NSPoint(x: 864, y: 1083.0), metrics: mbp16),
           "Cursor clamped at Notch bottom boundary y == visibleFrame.maxY (864, 1083.0) hits notchHotZone")
     check(TopHoverGeometry.isInMenuBarBand(NSPoint(x: 864, y: 1083.0), metrics: mbp16),
@@ -3024,56 +3097,56 @@ func runSelfTests() -> Int32 {
     Settings.pinned = false
     Settings.hoverReveal = true
 
-    let d = AppDelegate()
+    let testDelegate = AppDelegate()
     let t0 = Date()
 
-    d.isRevealed = false
-    d.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t0, metricsOverride: mbp16, pressedButtons: 0)
-    check(!d.isRevealed && d.hotZoneSince != nil, "Initial Notch hover arms hotZoneSince")
-    d.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t0.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
-    check(d.isRevealed, "Hovering at Notch bottom boundary (864, 1083.0) for 0.09s reveals clothesline")
+    testDelegate.isRevealed = false
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t0, metricsOverride: mbp16, pressedButtons: 0)
+    check(!testDelegate.isRevealed && testDelegate.hotZoneSince != nil, "Initial Notch hover arms hotZoneSince")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t0.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.isRevealed, "Hovering at Notch bottom boundary (864, 1083.0) for 0.09s reveals clothesline")
 
-    d.pollMouse(at: NSPoint(x: 864, y: 1070.0), now: t0.addingTimeInterval(1.0), metricsOverride: mbp16, pressedButtons: 0)
-    check(d.isRevealed && d.awaySince == nil, "Remaining in Notch apron (864, 1070.0) keeps clothesline open")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1070.0), now: t0.addingTimeInterval(1.0), metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.isRevealed && testDelegate.awaySince == nil, "Remaining in Notch apron (864, 1070.0) keeps clothesline open")
 
-    d.pollMouse(at: NSPoint(x: 864, y: 400.0), now: t0.addingTimeInterval(2.0), metricsOverride: mbp16, pressedButtons: 0)
-    check(d.isRevealed && d.awaySince != nil, "Leaving panel starts awaySince timer")
-    d.pollMouse(at: NSPoint(x: 864, y: 400.0), now: t0.addingTimeInterval(2.55), metricsOverride: mbp16, pressedButtons: 0)
-    check(!d.isRevealed, "Leaving panel for >= 0.5s tucks clothesline")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 400.0), now: t0.addingTimeInterval(2.0), metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.isRevealed && testDelegate.awaySince != nil, "Leaving panel starts awaySince timer")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 400.0), now: t0.addingTimeInterval(2.55), metricsOverride: mbp16, pressedButtons: 0)
+    check(!testDelegate.isRevealed, "Leaving panel for >= 0.5s tucks clothesline")
 
-    d.menuBarSuppressed = true
-    d.suppressedAtPoint = NSPoint(x: 1400, y: 1100)
-    d.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: t0.addingTimeInterval(3.0), metricsOverride: mbp16, pressedButtons: 0)
-    check(!d.menuBarSuppressed, "Moving into Notch clears menuBarSuppressed immediately")
-    d.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: t0.addingTimeInterval(3.09), metricsOverride: mbp16, pressedButtons: 0)
-    check(d.isRevealed, "Sliding from suppressed menu bar into Notch reveals clothesline")
+    testDelegate.menuBarSuppressed = true
+    testDelegate.suppressedAtPoint = NSPoint(x: 1400, y: 1100)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: t0.addingTimeInterval(3.0), metricsOverride: mbp16, pressedButtons: 0)
+    check(!testDelegate.menuBarSuppressed, "Moving into Notch clears menuBarSuppressed immediately")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1100.0), now: t0.addingTimeInterval(3.09), metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.isRevealed, "Sliding from suppressed menu bar into Notch reveals clothesline")
 
-    d.firstCollapseArmed = true
-    d.pollMouse(at: NSPoint(x: 864, y: 1117.0), now: t0.addingTimeInterval(4.0), metricsOverride: mbp16, pressedButtons: 0)
-    check(!d.firstCollapseArmed, "Visiting Notch/panel disarms firstCollapseArmed (heldUntilEnter)")
+    testDelegate.firstCollapseArmed = true
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1117.0), now: t0.addingTimeInterval(4.0), metricsOverride: mbp16, pressedButtons: 0)
+    check(!testDelegate.firstCollapseArmed, "Visiting Notch/panel disarms firstCollapseArmed (heldUntilEnter)")
 
-    d.tuck()
+    testDelegate.tuck()
     let t1 = t0.addingTimeInterval(5.0)
-    d.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t1, metricsOverride: mbp16, pressedButtons: 0)
-    check(d.hotZoneSince != nil, "Hover start sets hotZoneSince")
-    d.pollMouse(at: NSPoint(x: 864, y: 1020.0), now: t1.addingTimeInterval(0.03), metricsOverride: mbp16, pressedButtons: 0)
-    check(d.hotZoneSince != nil, "Brief 30ms dip below Notch apron preserves hotZoneSince via hysteresis")
-    d.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t1.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
-    check(d.isRevealed, "Returning to Notch within hysteresis completes reveal at 90ms")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t1, metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.hotZoneSince != nil, "Hover start sets hotZoneSince")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1020.0), now: t1.addingTimeInterval(0.03), metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.hotZoneSince != nil, "Brief 30ms dip below Notch apron preserves hotZoneSince via hysteresis")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t1.addingTimeInterval(0.09), metricsOverride: mbp16, pressedButtons: 0)
+    check(testDelegate.isRevealed, "Returning to Notch within hysteresis completes reveal at 90ms")
 
-    d.tuck()
+    testDelegate.tuck()
     let t2 = t0.addingTimeInterval(6.0)
-    d.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t2, metricsOverride: mbp16, pressedButtons: 1)
-    d.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t2.addingTimeInterval(0.30), metricsOverride: mbp16, pressedButtons: 1)
-    check(!d.isRevealed, "Mouse button pressed (window drag) does not trigger hover reveal")
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t2, metricsOverride: mbp16, pressedButtons: 1)
+    testDelegate.pollMouse(at: NSPoint(x: 864, y: 1083.0), now: t2.addingTimeInterval(0.30), metricsOverride: mbp16, pressedButtons: 1)
+    check(!testDelegate.isRevealed, "Mouse button pressed (window drag) does not trigger hover reveal")
 
-    d.reveal()
-    d.tuck()
-    check(d.tuckOrderOutWorkItem != nil, "tuck() schedules cancellable tuckOrderOutWorkItem")
-    d.reveal()
-    check(d.tuckOrderOutWorkItem == nil && d.isRevealed, "reveal() immediately cancels pending tuckOrderOutWorkItem")
+    testDelegate.reveal()
+    testDelegate.tuck()
+    check(testDelegate.tuckOrderOutWorkItem != nil, "tuck() schedules cancellable tuckOrderOutWorkItem")
+    testDelegate.reveal()
+    check(testDelegate.tuckOrderOutWorkItem == nil && testDelegate.isRevealed, "reveal() immediately cancels pending tuckOrderOutWorkItem")
 
-    // 验证纯状态机从菜单栏移入刘海时重算唤醒延时
+    // 移入刘海重算唤醒延时
     var pureState = ClotheslineHoverState()
     let panelFrame = NSRect(x: 0, y: 845, width: 1728, height: Layout.panelHeight)
     let act1 = ClotheslineHoverController.evaluate(

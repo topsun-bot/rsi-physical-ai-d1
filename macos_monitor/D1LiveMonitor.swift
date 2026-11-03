@@ -2,7 +2,7 @@ import Cocoa
 import Darwin
 import Foundation
 
-// MARK: - Structured Trace Logging, Safe IO & Typed Telemetry Models
+// 链路日志与安全文件读写
 
 enum TraceLogger {
     static func makeOperationId(prefix: String = "mon") -> String {
@@ -182,7 +182,7 @@ struct Insta360SceneGraphParser {
     }
 }
 
-// MARK: - Models & Config
+// 遥测状态模型与流模式
 
 struct ArmTelemetry {
     var name: String
@@ -190,7 +190,7 @@ struct ArmTelemetry {
     var joints: [Double] = [0.0, -89.5, 89.0, 0.0, 5.0, 0.0, 0.0]
     var online: Bool = false
     var color: NSColor
-    var roiNormalized: NSRect // Normalized (0..1) in top-left origin image coords (2304x1296)
+    var roiNormalized: NSRect // 左上原点归一化坐标
 }
 
 enum StreamMode: Int, CaseIterable {
@@ -237,7 +237,7 @@ final class MonitorState {
     var alwaysOnTop: Bool = true
     var streamMode: StreamMode = .rtspSub
 
-    // Insta360 X4 Air (10.10.137.106) live state
+    // Insta360环视状态
     var insta360PanoImage: NSImage?
     var insta360RectImage: NSImage?
     var insta360HUDImage: NSImage?
@@ -273,14 +273,14 @@ final class MonitorState {
     ]
 }
 
-// MARK: - Custom Draggable Floating Panel
+// 可拖拽置顶监控浮窗
 
 final class FloatingMonitorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 }
 
-// MARK: - Video + Vector HUD Canvas View
+// 视频与矢量遥测叠加画布
 
 final class VideoHUDView: NSView {
     let state: MonitorState
@@ -314,9 +314,9 @@ final class VideoHUDView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard let win = self.window else { return }
         let current = NSEvent.mouseLocation
-        let dx = current.x - initialMouseLocation.x
-        let dy = current.y - initialMouseLocation.y
-        win.setFrameOrigin(NSPoint(x: initialWindowOrigin.x + dx, y: initialWindowOrigin.y + dy))
+        let deltaX = current.x - initialMouseLocation.x
+        let deltaY = current.y - initialMouseLocation.y
+        win.setFrameOrigin(NSPoint(x: initialWindowOrigin.x + deltaX, y: initialWindowOrigin.y + deltaY))
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -360,7 +360,7 @@ final class VideoHUDView: NSView {
             img = rawImg
         }
 
-        // 1. Draw Live Video Frame below the 36px top header bar so camera OSD timestamp is 100% visible
+        // 避开顶栏保时间戳可见
         let headerOffset: CGFloat = 36
         let videoRect = NSRect(x: 0, y: 0, width: bounds.width, height: max(60, bounds.height - headerOffset))
         if let image = img {
@@ -373,7 +373,7 @@ final class VideoHUDView: NSView {
                 hints: [.interpolation: NSNumber(value: NSImageInterpolation.high.rawValue)]
             )
         } else {
-            // Loading placeholder
+            // 连接中占位提示
             let pStyle = NSMutableParagraphStyle()
             pStyle.alignment = .center
             let attrs: [NSAttributedString.Key: Any] = [
@@ -388,12 +388,12 @@ final class VideoHUDView: NSView {
         let hasInstaPiP = showInstaPiP && (mode == .rtspSub || mode == .rtspHD || mode == .hubHTTP)
             && (instaPano != nil || instaRect != nil)
 
-        // 2. Vector ROI Overlay (only when enabled on overhead RTSP stream)
+        // 俯视流叠加三臂ROI框
         if showROI && (mode == .rtspSub || mode == .rtspHD) {
             drawROIBoxes(in: videoRect, arms: arms, avoidTopLeftPiP: hasInstaPiP)
         }
 
-        // 2b. Insta360 X4 Air Dual-View Picture-in-Picture (360° Panorama + Rectilinear Pinhole Side View)
+        // 叠加Insta360画中画
         if hasInstaPiP {
             drawInsta360PiPCard(
                 in: videoRect,
@@ -406,7 +406,7 @@ final class VideoHUDView: NSView {
             )
         }
 
-        // 3. Status Pill in Top-Right of videoRect (keeps top-left camera OSD timestamp 100% clear)
+        // 右上角绘制实时状态胶囊
         let effectiveConnected = (mode == .insta360HUD || mode == .insta360Rectilinear) ? (img != nil) : connected
         let effectiveFPS = (mode == .insta360HUD || mode == .insta360Rectilinear) ? 30.0 : fps
         drawLiveStatusBadge(
@@ -418,7 +418,7 @@ final class VideoHUDView: NSView {
             cycle: cyc
         )
 
-        // 4. Bottom Telemetry Overlay Bar
+        // 底部绘制编码器遥测条
         if showBottom {
             drawBottomTelemetryBar(
                 in: videoRect,
@@ -449,16 +449,16 @@ final class VideoHUDView: NSView {
         let subW = (cardW - 12) / 2.0
         let subH = round(subW * 0.56)
         let cardH = headerH + subH + 8
-        // Place below the top-left camera OSD timestamp (leaves top 38px completely clear)
+        // 避开左上角OSD时间戳
         let cardRect = NSRect(x: bounds.minX + 10, y: bounds.maxY - 38 - cardH, width: cardW, height: cardH)
         guard cardRect.minY > 56 else { return }
 
-        let bg = NSBezierPath(roundedRect: cardRect, xRadius: 7, yRadius: 7)
+        let cardBorderPath = NSBezierPath(roundedRect: cardRect, xRadius: 7, yRadius: 7)
         NSColor(calibratedRed: 0.04, green: 0.07, blue: 0.13, alpha: 0.90).setFill()
-        bg.fill()
+        cardBorderPath.fill()
         NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.04, alpha: 0.82).setStroke()
-        bg.lineWidth = 1.2
-        bg.stroke()
+        cardBorderPath.lineWidth = 1.2
+        cardBorderPath.stroke()
 
         let singleLine = NSMutableParagraphStyle()
         singleLine.lineBreakMode = .byTruncatingTail
@@ -479,11 +479,11 @@ final class VideoHUDView: NSView {
         let leftRect = NSRect(x: cardRect.minX + 4, y: cardRect.minY + 4, width: subW, height: subH)
         let rightRect = NSRect(x: cardRect.minX + 8 + subW, y: cardRect.minY + 4, width: subW, height: subH)
 
-        if let p = pano {
-            p.draw(in: leftRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+        if let panoImage = pano {
+            panoImage.draw(in: leftRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
         }
-        if let r = rectView {
-            r.draw(in: rightRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+        if let rectilinearImage = rectView {
+            rectilinearImage.draw(in: rightRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
         }
 
         let tagFont = NSFont.systemFont(ofSize: 8.5, weight: .semibold)
@@ -506,21 +506,21 @@ final class VideoHUDView: NSView {
 
         for key in order {
             guard let arm = arms[key] else { continue }
-            let nr = arm.roiNormalized
-            // Convert top-left normalized coords to Cocoa bottom-left coords
-            let bx = rect.minX + nr.origin.x * rect.width
-            let bw = nr.size.width * rect.width
-            let bh = nr.size.height * rect.height
-            let by = rect.maxY - (nr.origin.y + nr.size.height) * rect.height
-            let boxRect = NSRect(x: bx, y: by, width: bw, height: bh)
+            let normalizedRect = arm.roiNormalized
+            // 转左上原点至Cocoa坐标
+            let boxMinX = rect.minX + normalizedRect.origin.x * rect.width
+            let boxWidth = normalizedRect.size.width * rect.width
+            let boxHeight = normalizedRect.size.height * rect.height
+            let boxMinY = rect.maxY - (normalizedRect.origin.y + normalizedRect.size.height) * rect.height
+            let boxRect = NSRect(x: boxMinX, y: boxMinY, width: boxWidth, height: boxHeight)
 
             let path = NSBezierPath(roundedRect: boxRect, xRadius: 5, yRadius: 5)
             path.lineWidth = 1.8
             arm.color.withAlphaComponent(0.88).setStroke()
             path.stroke()
 
-            let j = arm.joints
-            let labelStr = String(format: " %@ J0:%.0f° 爪:%.0f° ", arm.name, j[0], j[6])
+            let jointAngles = arm.joints
+            let labelStr = String(format: " %@ J0:%.0f° 爪:%.0f° ", arm.name, jointAngles[0], jointAngles[6])
             let singleLine = NSMutableParagraphStyle()
             singleLine.lineBreakMode = .byTruncatingTail
             let attrs: [NSAttributedString.Key: Any] = [
@@ -548,7 +548,7 @@ final class VideoHUDView: NSView {
             )
         }
 
-        // Target object boxes (Plug & Socket)
+        // 绘制插头插座织物框
         let targets: [(String, NSRect, NSColor)] = [
             ("🔌 插头 Plug", NSRect(x: 520.0 / 2304.0, y: 1060.0 / 1296.0, width: 170.0 / 2304.0, height: 155.0 / 1296.0),
              NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.04, alpha: 0.9)),
@@ -558,23 +558,23 @@ final class VideoHUDView: NSView {
              NSColor(calibratedRed: 0.05, green: 0.65, blue: 0.91, alpha: 0.85))
         ]
         let smallFont = NSFont.systemFont(ofSize: max(9.5, min(11, rect.width * 0.014)), weight: .bold)
-        for (title, nr, col) in targets {
-            let bx = rect.minX + nr.origin.x * rect.width
-            let bw = nr.size.width * rect.width
-            let bh = nr.size.height * rect.height
-            let by = rect.maxY - (nr.origin.y + nr.size.height) * rect.height
-            let r = NSRect(x: bx, y: by, width: bw, height: bh)
-            let p = NSBezierPath(roundedRect: r, xRadius: 3, yRadius: 3)
-            p.lineWidth = 1.5
-            col.setStroke()
-            p.stroke()
+        for (title, normalizedRect, strokeColor) in targets {
+            let boxMinX = rect.minX + normalizedRect.origin.x * rect.width
+            let boxWidth = normalizedRect.size.width * rect.width
+            let boxHeight = normalizedRect.size.height * rect.height
+            let boxMinY = rect.maxY - (normalizedRect.origin.y + normalizedRect.size.height) * rect.height
+            let targetBoxRect = NSRect(x: boxMinX, y: boxMinY, width: boxWidth, height: boxHeight)
+            let targetBorderPath = NSBezierPath(roundedRect: targetBoxRect, xRadius: 3, yRadius: 3)
+            targetBorderPath.lineWidth = 1.5
+            strokeColor.setStroke()
+            targetBorderPath.stroke()
 
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: smallFont,
-                .foregroundColor: col,
+                .foregroundColor: strokeColor,
                 .backgroundColor: NSColor(calibratedWhite: 0.05, alpha: 0.72)
             ]
-            (title as NSString).draw(at: NSPoint(x: r.minX, y: max(58, r.minY - 15)), withAttributes: attrs)
+            (title as NSString).draw(at: NSPoint(x: targetBoxRect.minX, y: max(58, targetBoxRect.minY - 15)), withAttributes: attrs)
         }
     }
 
@@ -595,7 +595,7 @@ final class VideoHUDView: NSView {
         path.lineWidth = 1.0
         path.stroke()
 
-        // Dot
+        // 状态灯圆点
         let dotRect = NSRect(x: pillRect.minX + 9, y: pillRect.minY + 6.5, width: 10, height: 10)
         let dotPath = NSBezierPath(ovalIn: dotRect)
         if connected {
@@ -644,7 +644,7 @@ final class VideoHUDView: NSView {
         let fontBold = NSFont.monospacedDigitSystemFont(ofSize: fSize, weight: .bold)
         let fontSub = NSFont.systemFont(ofSize: fSize, weight: .medium)
 
-        // Line 1: 3 Arms telemetry summary
+        // 首行三臂关节角汇总
         let lArm = arms["left_103"]?.joints ?? [0, 0, 0, 0, 0, 0, 0]
         let cArm = arms["center_102"]?.joints ?? [0, 0, 0, 0, 0, 0, 0]
         let rArm = arms["right_101"]?.joints ?? [0, 0, 0, 0, 0, 0, 0]
@@ -665,7 +665,7 @@ final class VideoHUDView: NSView {
             withAttributes: line1Attrs
         )
 
-        // Line 2: Current Skill & Phase + Insta360 360° telemetry
+        // 次行技能与环视净空
         let modeBadge = continuous ? "🔥 24/7进化中" : "⏸ 手动监控"
         let instaTag = String(format: "🌐Insta360(106): 30fps/%dms/Z净空%.1fmm", instaAgeMs, instaZ)
         let line2 = "\(modeBadge) | \(instaTag) | 技能: \(skill) | \(phase)"
@@ -681,10 +681,10 @@ final class VideoHUDView: NSView {
     }
 }
 
-// MARK: - Stream & Telemetry Workers
+// 视频流与遥测后台线程
 
 private func loadLocalStreamConfig(_ key: String, fallback: String) -> String {
-    if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty { return v }
+    if let envValue = ProcessInfo.processInfo.environment[key], !envValue.isEmpty { return envValue }
     let cfgFile = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/d1_clothesline/\(key)")
     guard FileManager.default.fileExists(atPath: cfgFile.path) else { return fallback }
@@ -913,9 +913,9 @@ final class LiveStreamController {
         }
 
         state.lock.lock()
-        if let p = panoImg { state.insta360PanoImage = p }
-        if let r = rectImg { state.insta360RectImage = r }
-        if let h = hudImg { state.insta360HUDImage = h }
+        if let loadedPano = panoImg { state.insta360PanoImage = loadedPano }
+        if let loadedRect = rectImg { state.insta360RectImage = loadedRect }
+        if let loadedHud = hudImg { state.insta360HUDImage = loadedHud }
         state.insta360Online = parsedSnapshot.online
         state.insta360Frames = parsedSnapshot.frames
         state.insta360AgeMs = parsedSnapshot.ageMs
@@ -1050,7 +1050,7 @@ final class LiveStreamController {
             }
             buffer.append(chunk)
 
-            // 丢弃堆积旧帧仅渲染最新完整帧
+            // 丢弃堆积帧保最新帧
             var latestJPEG: Data?
             while true {
                 guard let soiRange = buffer.range(of: soiMarker) else {
@@ -1082,8 +1082,8 @@ final class LiveStreamController {
         let now = Date().timeIntervalSince1970
         state.lock.lock()
         if state.lastFrameTime > 0 {
-            let dt = max(0.005, now - state.lastFrameTime)
-            let instFPS = 1.0 / dt
+            let deltaSec = max(0.005, now - state.lastFrameTime)
+            let instFPS = 1.0 / deltaSec
             state.fps = (state.fps == 0) ? instFPS : (state.fps * 0.82 + instFPS * 0.18)
         }
         state.lastFrameTime = now
@@ -1097,7 +1097,7 @@ final class LiveStreamController {
         }
     }
 
-    // MARK: Direct UDP Arm Telemetry + Hub Status Sync
+    // UDP机械臂与中控遥测同步
 
     private func telemetryLoop() {
         let sessionCfg = URLSessionConfiguration.ephemeral
@@ -1125,7 +1125,7 @@ final class LiveStreamController {
                 }
             }
 
-            // 降频轮询远端中控降低开销
+            // 降频轮询中控减负
             if tick % 3 == 0, let url = statusURL {
                 let task = session.dataTask(with: url) { [weak self] payloadData, _, err in
                     guard let self = self,
@@ -1148,8 +1148,8 @@ final class LiveStreamController {
                     self.state.lock.lock()
                     if let cont = decoded.continuous_mode { self.state.continuousMode = cont }
                     if let cyc = decoded.cycle_count { self.state.cycleCount = cyc }
-                    if let sk = decoded.current_skill { self.state.currentSkill = sk }
-                    if let ph = decoded.current_phase { self.state.currentPhase = ph }
+                    if let skillName = decoded.current_skill { self.state.currentSkill = skillName }
+                    if let phaseName = decoded.current_phase { self.state.currentPhase = phaseName }
                     self.state.lock.unlock()
                 }
                 task.resume()
@@ -1164,12 +1164,12 @@ final class LiveStreamController {
     }
 
     private func queryArmUDP(ip: String, port: UInt16) -> [Double]? {
-        let fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
-        guard fd >= 0 else { return nil }
-        defer { close(fd) }
+        let sockFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)
+        guard sockFd >= 0 else { return nil }
+        defer { close(sockFd) }
 
-        var tv = timeval(tv_sec: 0, tv_usec: 180_000)
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        var timeoutVal = timeval(tv_sec: 0, tv_usec: 180_000)
+        setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &timeoutVal, socklen_t(MemoryLayout<timeval>.size))
 
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -1181,23 +1181,23 @@ final class LiveStreamController {
         let sent = msg.withUnsafeBytes { ptr -> Int in
             withUnsafePointer(to: &addr) { addrPtr in
                 addrPtr.withMemoryRebound(to: sockaddr.self, capacity: 1) { saPtr in
-                    sendto(fd, ptr.baseAddress, ptr.count, 0, saPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    sendto(sockFd, ptr.baseAddress, ptr.count, 0, saPtr, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
         }
         guard sent > 0 else { return nil }
 
         var buf = [UInt8](repeating: 0, count: 256)
-        let n = recv(fd, &buf, buf.count - 1, 0)
-        guard n > 0 else { return nil }
+        let bytesRead = recv(sockFd, &buf, buf.count - 1, 0)
+        guard bytesRead > 0 else { return nil }
 
-        let str = String(decoding: buf.prefix(n), as: UTF8.self)
+        let str = String(decoding: buf.prefix(bytesRead), as: UTF8.self)
         let parts = str.split(whereSeparator: { $0.isWhitespace })
         guard parts.count >= 8, parts[0] == "OK" else { return nil }
         var vals: [Double] = []
-        for i in 1...7 {
-            if let v = Double(parts[i]) {
-                vals.append(v)
+        for tokenIdx in 1...7 {
+            if let jointVal = Double(parts[tokenIdx]) {
+                vals.append(jointVal)
             } else {
                 return nil
             }
@@ -1258,7 +1258,7 @@ final class LiveStreamController {
     }
 }
 
-// MARK: - App Delegate & UI Construction
+// 生命周期与窗口界面装配
 
 enum MonitorDateFormatters {
     static let fileStamp: DateFormatter = {
@@ -1276,7 +1276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var signalSources: [DispatchSourceSignal] = []
 
-    // Header buttons for state reflection
+    // 顶栏状态反射按钮
     var pinButton: NSButton!
     var roiButton: NSButton!
     var instaButton: NSButton!
@@ -1296,9 +1296,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.videoView.needsDisplay = true
             self.updateHeaderButtons()
             self.state.lock.lock()
-            let fc = self.state.frameCount
+            let currentFrameCount = self.state.frameCount
             self.state.lock.unlock()
-            if fc == 8 {
+            if currentFrameCount == 8 {
                 self.exportLatestVerificationSnapshot()
             }
         }
@@ -1371,7 +1371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.layer?.cornerRadius = 10
         container.layer?.masksToBounds = true
 
-        // Video HUD View
+        // 实时视频遥测画布
         videoView = VideoHUDView(state: state)
         videoView.frame = container.bounds
         videoView.autoresizingMask = [.width, .height]
@@ -1380,7 +1380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         container.addSubview(videoView)
 
-        // Top Translucent Header Bar (36px)
+        // 顶部半透明控制栏
         let headerHeight: CGFloat = 36
         let headerBar = NSVisualEffectView(
             frame: NSRect(x: 0, y: initialRect.height - headerHeight, width: initialRect.width, height: headerHeight)
@@ -1396,7 +1396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         titleLabel.frame = NSRect(x: 72, y: 8, width: 136, height: 20)
         headerBar.addSubview(titleLabel)
 
-        // Right-aligned quick action buttons in Header Bar
+        // 顶栏右侧快捷按钮组
         let btnStack = NSStackView()
         btnStack.orientation = .horizontal
         btnStack.spacing = 4
@@ -1515,7 +1515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         workButton?.title = cont ? "🔥24/7" : "⚡抓插"
     }
 
-    // MARK: Actions
+    // 交互与远程控制动作
 
     @objc func bringToFront() {
         panel.makeKeyAndOrderFront(nil)
@@ -1594,10 +1594,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func sizeLarge()  { resizeWindow(width: 980, height: 586) }
 
     @objc func toggleWindowSizePreset() {
-        let w = panel.frame.width
-        if w < 520 {
+        let currentWidth = panel.frame.width
+        if currentWidth < 520 {
             sizeMedium()
-        } else if w < 820 {
+        } else if currentWidth < 820 {
             sizeLarge()
         } else {
             sizeSmall()
@@ -1605,11 +1605,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resizeWindow(width: CGFloat, height: CGFloat) {
-        var f = panel.frame
-        let topY = f.maxY
-        f.size = NSSize(width: width, height: height)
-        f.origin.y = topY - height
-        panel.setFrame(f, display: true, animate: true)
+        var nextFrame = panel.frame
+        let topY = nextFrame.maxY
+        nextFrame.size = NSSize(width: width, height: height)
+        nextFrame.origin.y = topY - height
+        panel.setFrame(nextFrame, display: true, animate: true)
     }
 
     @objc func toggleOpacity() {
@@ -1650,14 +1650,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else { return }
 
         let opId = TraceLogger.makeOperationId(prefix: "snap")
-        let ts = MonitorDateFormatters.fileStamp.string(from: Date())
+        let stampStr = MonitorDateFormatters.fileStamp.string(from: Date())
         let outDir = URL(fileURLWithPath: "/Users/zhang/Documents/RSI/runs/snapshots")
         FileIO.ensureDirectory(outDir, operationId: opId, context: "saveSnapshot")
-        let outFile = outDir.appendingPathComponent("d1_monitor_\(ts).png")
+        let outFile = outDir.appendingPathComponent("d1_monitor_\(stampStr).png")
         FileIO.writeData(pngData, to: outFile, operationId: opId, context: "saveSnapshot")
 
         state.lock.lock()
-        state.currentPhase = "📸 已保存截图: runs/snapshots/d1_monitor_\(ts).png"
+        state.currentPhase = "📸 已保存截图: runs/snapshots/d1_monitor_\(stampStr).png"
         state.lock.unlock()
         videoView.needsDisplay = true
     }
@@ -1669,7 +1669,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-// MARK: - Automated Self-Test
+// 内置解析与协议自测
 
 func runSelfTests() -> Int32 {
     var failures: [String] = []
@@ -1719,7 +1719,7 @@ if CommandLine.arguments.contains("--self-test") {
     exit(runSelfTests())
 }
 
-// MARK: - Main Entry
+// 启动监控主应用事件循环
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
