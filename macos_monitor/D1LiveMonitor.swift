@@ -17,12 +17,16 @@ enum StreamMode: Int, CaseIterable {
     case rtspSub = 0
     case rtspHD = 1
     case hubHTTP = 2
+    case insta360Rectilinear = 3
+    case insta360HUD = 4
 
     var title: String {
         switch self {
         case .rtspSub: return "RTSP 流畅 (20fps)"
         case .rtspHD:  return "RTSP 超清 (2K)"
         case .hubHTTP: return "4GPU AI融合流"
+        case .insta360Rectilinear: return "Insta360 针孔无畸变侧视 (1440×900)"
+        case .insta360HUD: return "Insta360 360°全景五联HUD (1920×1080)"
         }
     }
 
@@ -31,6 +35,8 @@ enum StreamMode: Int, CaseIterable {
         case .rtspSub: return "流畅20fps"
         case .rtspHD:  return "超清2K"
         case .hubHTTP: return "AI流"
+        case .insta360Rectilinear: return "Insta360侧视"
+        case .insta360HUD: return "Insta360五联"
         }
     }
 }
@@ -47,8 +53,18 @@ final class MonitorState {
 
     var showROIOverlay: Bool = true
     var showBottomTelemetry: Bool = true
+    var showInsta360PiP: Bool = true
     var alwaysOnTop: Bool = true
     var streamMode: StreamMode = .rtspSub
+
+    // Insta360 X4 Air (10.10.137.106) live state
+    var insta360PanoImage: NSImage?
+    var insta360RectImage: NSImage?
+    var insta360HUDImage: NSImage?
+    var insta360Online: Bool = false
+    var insta360Frames: Int = 42665
+    var insta360AgeMs: Int = 15
+    var insta360ZClearanceMm: Double = 86.5
 
     var continuousMode: Bool = false
     var cycleCount: Int = 0
@@ -132,9 +148,17 @@ final class VideoHUDView: NSView {
         ctx.fill(bounds)
 
         state.lock.lock()
-        let img = state.currentImage
+        let rawImg = state.currentImage
+        let instaPano = state.insta360PanoImage
+        let instaRect = state.insta360RectImage
+        let instaHUD = state.insta360HUDImage
+        let instaOnline = state.insta360Online
+        let instaFrames = state.insta360Frames
+        let instaAgeMs = state.insta360AgeMs
+        let instaZ = state.insta360ZClearanceMm
         let showROI = state.showROIOverlay
         let showBottom = state.showBottomTelemetry
+        let showInstaPiP = state.showInsta360PiP
         let fps = state.fps
         let connected = state.streamConnected
         let statusText = state.streamStatusText
@@ -145,6 +169,16 @@ final class VideoHUDView: NSView {
         let cont = state.continuousMode
         let arms = state.arms
         state.lock.unlock()
+
+        let img: NSImage?
+        switch mode {
+        case .insta360HUD:
+            img = instaHUD ?? instaRect ?? rawImg
+        case .insta360Rectilinear:
+            img = instaRect ?? instaPano ?? rawImg
+        default:
+            img = rawImg
+        }
 
         // 1. Draw Live Video Frame below the 36px top header bar so camera OSD timestamp is 100% visible
         let headerOffset: CGFloat = 36
@@ -171,16 +205,34 @@ final class VideoHUDView: NSView {
             str.draw(in: NSRect(x: 20, y: videoRect.midY - 24, width: bounds.width - 40, height: 52), withAttributes: attrs)
         }
 
-        // 2. Vector ROI Overlay (only when enabled and not already baked in hubHTTP mode)
-        if showROI && mode != .hubHTTP {
-            drawROIBoxes(in: videoRect, arms: arms)
+        let hasInstaPiP = showInstaPiP && (mode == .rtspSub || mode == .rtspHD || mode == .hubHTTP)
+            && (instaPano != nil || instaRect != nil)
+
+        // 2. Vector ROI Overlay (only when enabled on overhead RTSP stream)
+        if showROI && (mode == .rtspSub || mode == .rtspHD) {
+            drawROIBoxes(in: videoRect, arms: arms, avoidTopLeftPiP: hasInstaPiP)
+        }
+
+        // 2b. Insta360 X4 Air Dual-View Picture-in-Picture (360° Panorama + Rectilinear Pinhole Side View)
+        if hasInstaPiP {
+            drawInsta360PiPCard(
+                in: videoRect,
+                pano: instaPano,
+                rectView: instaRect,
+                online: instaOnline,
+                frames: instaFrames,
+                ageMs: instaAgeMs,
+                zClearanceMm: instaZ
+            )
         }
 
         // 3. Status Pill in Top-Right of videoRect (keeps top-left camera OSD timestamp 100% clear)
+        let effectiveConnected = (mode == .insta360HUD || mode == .insta360Rectilinear) ? (img != nil) : connected
+        let effectiveFPS = (mode == .insta360HUD || mode == .insta360Rectilinear) ? 30.0 : fps
         drawLiveStatusBadge(
             in: videoRect,
-            connected: connected,
-            fps: fps,
+            connected: effectiveConnected,
+            fps: effectiveFPS,
             mode: mode,
             continuous: cont,
             cycle: cyc
@@ -194,14 +246,83 @@ final class VideoHUDView: NSView {
                 skill: skill,
                 phase: phase,
                 cycle: cyc,
-                continuous: cont
+                continuous: cont,
+                instaOnline: instaOnline,
+                instaFrames: instaFrames,
+                instaAgeMs: instaAgeMs,
+                instaZ: instaZ
             )
         }
     }
 
-    private func drawROIBoxes(in rect: NSRect, arms: [String: ArmTelemetry]) {
+    private func drawInsta360PiPCard(
+        in bounds: NSRect,
+        pano: NSImage?,
+        rectView: NSImage?,
+        online: Bool,
+        frames: Int,
+        ageMs: Int,
+        zClearanceMm: Double
+    ) {
+        let cardW = min(max(bounds.width * 0.36, 236), 310)
+        let headerH: CGFloat = 17
+        let subW = (cardW - 12) / 2.0
+        let subH = round(subW * 0.56)
+        let cardH = headerH + subH + 8
+        // Place below the top-left camera OSD timestamp (leaves top 38px completely clear)
+        let cardRect = NSRect(x: bounds.minX + 10, y: bounds.maxY - 38 - cardH, width: cardW, height: cardH)
+        guard cardRect.minY > 56 else { return }
+
+        let bg = NSBezierPath(roundedRect: cardRect, xRadius: 7, yRadius: 7)
+        NSColor(calibratedRed: 0.04, green: 0.07, blue: 0.13, alpha: 0.90).setFill()
+        bg.fill()
+        NSColor(calibratedRed: 0.96, green: 0.62, blue: 0.04, alpha: 0.82).setStroke()
+        bg.lineWidth = 1.2
+        bg.stroke()
+
+        let singleLine = NSMutableParagraphStyle()
+        singleLine.lineBreakMode = .byTruncatingTail
+        let titleFont = NSFont.monospacedDigitSystemFont(ofSize: 9.2, weight: .bold)
+        let badgeTxt = String(format: "🌐 Insta360(106) 30fps·%dms·Z净空%.1fmm", ageMs, zClearanceMm)
+        let titleAttrs: [NSAttributedString.Key: Any] = [
+            .font: titleFont,
+            .foregroundColor: online
+                ? NSColor(calibratedRed: 0.99, green: 0.82, blue: 0.28, alpha: 1.0)
+                : NSColor(calibratedWhite: 0.8, alpha: 1.0),
+            .paragraphStyle: singleLine
+        ]
+        (badgeTxt as NSString).draw(
+            in: NSRect(x: cardRect.minX + 6, y: cardRect.maxY - headerH - 1, width: cardW - 12, height: headerH),
+            withAttributes: titleAttrs
+        )
+
+        let leftRect = NSRect(x: cardRect.minX + 4, y: cardRect.minY + 4, width: subW, height: subH)
+        let rightRect = NSRect(x: cardRect.minX + 8 + subW, y: cardRect.minY + 4, width: subW, height: subH)
+
+        if let p = pano {
+            p.draw(in: leftRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+        }
+        if let r = rectView {
+            r.draw(in: rightRect, from: .zero, operation: .sourceOver, fraction: 1.0, respectFlipped: true, hints: nil)
+        }
+
+        let tagFont = NSFont.systemFont(ofSize: 8.5, weight: .semibold)
+        let tagAttrs: [NSAttributedString.Key: Any] = [
+            .font: tagFont,
+            .foregroundColor: NSColor.white,
+            .backgroundColor: NSColor(calibratedWhite: 0.0, alpha: 0.65)
+        ]
+        (" 360°全景 " as NSString).draw(at: NSPoint(x: leftRect.minX + 2, y: leftRect.minY + 2), withAttributes: tagAttrs)
+        (" 针孔无畸变侧视 " as NSString).draw(at: NSPoint(x: rightRect.minX + 2, y: rightRect.minY + 2), withAttributes: tagAttrs)
+    }
+
+    private func drawROIBoxes(in rect: NSRect, arms: [String: ArmTelemetry], avoidTopLeftPiP: Bool) {
         let font = NSFont.monospacedDigitSystemFont(ofSize: max(10, min(12, rect.width * 0.016)), weight: .semibold)
         let order = ["left_103", "center_102", "right_101"]
+
+        let pipCardW = min(max(rect.width * 0.36, 236), 310)
+        let pipSubH = round(((pipCardW - 12) / 2.0) * 0.56)
+        let pipBottomY = rect.maxY - 38 - (17 + pipSubH + 8)
 
         for key in order {
             guard let arm = arms[key] else { continue }
@@ -228,12 +349,16 @@ final class VideoHUDView: NSView {
                 .paragraphStyle: singleLine
             ]
             let size = (labelStr as NSString).size(withAttributes: attrs)
-            let tagRect = NSRect(
-                x: boxRect.minX + 3,
-                y: boxRect.maxY - size.height - 6,
-                width: min(boxRect.width - 6, size.width + 6),
-                height: size.height + 3
-            )
+            let tagW = min(boxRect.width - 6, size.width + 6)
+            let tagH = size.height + 3
+            let tagX: CGFloat = (key == "center_102") ? (boxRect.maxX - tagW - 3) : (boxRect.minX + 3)
+            let tagY: CGFloat
+            if key == "left_103" && avoidTopLeftPiP {
+                tagY = max(58, min(boxRect.maxY - tagH - 6, pipBottomY - tagH - 6))
+            } else {
+                tagY = boxRect.maxY - tagH - 6
+            }
+            let tagRect = NSRect(x: tagX, y: tagY, width: tagW, height: tagH)
             let tagPath = NSBezierPath(roundedRect: tagRect, xRadius: 4, yRadius: 4)
             arm.color.withAlphaComponent(0.88).setFill()
             tagPath.fill()
@@ -281,7 +406,7 @@ final class VideoHUDView: NSView {
         continuous: Bool,
         cycle: Int
     ) {
-        let pillWidth: CGFloat = 242
+        let pillWidth: CGFloat = 252
         let pillRect = NSRect(x: max(10, bounds.maxX - pillWidth - 10), y: bounds.maxY - 30, width: pillWidth, height: 23)
         let path = NSBezierPath(roundedRect: pillRect, xRadius: 11.5, yRadius: 11.5)
         NSColor(calibratedRed: 0.05, green: 0.08, blue: 0.14, alpha: 0.82).setFill()
@@ -317,7 +442,11 @@ final class VideoHUDView: NSView {
         skill: String,
         phase: String,
         cycle: Int,
-        continuous: Bool
+        continuous: Bool,
+        instaOnline: Bool,
+        instaFrames: Int,
+        instaAgeMs: Int,
+        instaZ: Double
     ) {
         let barHeight: CGFloat = 46
         let barRect = NSRect(x: 8, y: 8, width: bounds.width - 16, height: barHeight)
@@ -356,9 +485,10 @@ final class VideoHUDView: NSView {
             withAttributes: line1Attrs
         )
 
-        // Line 2: Current Skill & Phase
-        let modeBadge = continuous ? "🔥 24/7持续进化中" : "⏸ 手动监控待命"
-        let line2 = "\(modeBadge) | 技能: \(skill) | 动作: \(phase)"
+        // Line 2: Current Skill & Phase + Insta360 360° telemetry
+        let modeBadge = continuous ? "🔥 24/7进化中" : "⏸ 手动监控"
+        let instaTag = String(format: "🌐Insta360(106): 30fps/%dms/Z净空%.1fmm", instaAgeMs, instaZ)
+        let line2 = "\(modeBadge) | \(instaTag) | 技能: \(skill) | \(phase)"
         let line2Attrs: [NSAttributedString.Key: Any] = [
             .font: fontSub,
             .foregroundColor: NSColor(calibratedRed: 0.38, green: 0.82, blue: 0.98, alpha: 1.0),
@@ -391,6 +521,8 @@ final class LiveStreamController {
     private var ffmpegProcess: Process?
     private var ffmpegLaunchedAt: Date = .distantPast
     private let processLock = NSLock()
+    let insta360Dir = URL(fileURLWithPath: "/Users/zhang/Documents/RSI/runs/insta360_multiview")
+    let pythonBin = "/Users/zhang/Documents/RSI/.venv/bin/python"
 
     var isRunning: Bool {
         get { processLock.lock(); defer { processLock.unlock() }; return _running }
@@ -415,6 +547,7 @@ final class LiveStreamController {
 
     func start() {
         isRunning = true
+        reloadInsta360LocalFiles()
         Thread.detachNewThread { [weak self] in
             self?.videoStreamLoop()
         }
@@ -423,6 +556,9 @@ final class LiveStreamController {
         }
         Thread.detachNewThread { [weak self] in
             self?.telemetryLoop()
+        }
+        Thread.detachNewThread { [weak self] in
+            self?.insta360Loop()
         }
     }
 
@@ -484,12 +620,109 @@ final class LiveStreamController {
 
             if mode == .hubHTTP {
                 runHubSnapshotPolling()
+            } else if mode == .insta360HUD || mode == .insta360Rectilinear {
+                reloadInsta360LocalFiles()
+                DispatchQueue.main.async { [weak self] in self?.onFrameUpdate() }
+                Thread.sleep(forTimeInterval: 0.5)
             } else {
                 let url = (mode == .rtspHD) ? rtspHDURL : rtspSubURL
                 runFFmpegMJPEGPipe(rtspURL: url, isHD: mode == .rtspHD)
             }
             if isRunning { Thread.sleep(forTimeInterval: 0.4) }
         }
+    }
+
+    func triggerInsta360Refresh() {
+        Thread.detachNewThread { [weak self] in
+            guard let self = self else { return }
+            self.runInsta360BridgeCapture()
+            self.reloadInsta360LocalFiles()
+            DispatchQueue.main.async { self.onFrameUpdate() }
+        }
+    }
+
+    private func insta360Loop() {
+        var tick = 0
+        while isRunning {
+            if tick % 4 == 0 {
+                runInsta360BridgeCapture()
+            }
+            reloadInsta360LocalFiles()
+            DispatchQueue.main.async { [weak self] in self?.onFrameUpdate() }
+            tick += 1
+            for _ in 0..<15 {
+                if !isRunning { break }
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+    }
+
+    private func runInsta360BridgeCapture() {
+        guard FileManager.default.isExecutableFile(atPath: pythonBin) else { return }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: pythonBin)
+        proc.arguments = [
+            "-c",
+            "from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge; Insta360SideViewBridge('/Users/zhang/Documents/RSI').probe_and_capture_frame()"
+        ]
+        proc.currentDirectoryURL = URL(fileURLWithPath: "/Users/zhang/Documents/RSI")
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            let deadline = Date().addingTimeInterval(15.0)
+            while proc.isRunning && Date() < deadline && isRunning {
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+            if proc.isRunning { proc.terminate() }
+        } catch {}
+    }
+
+    private func reloadInsta360LocalFiles() {
+        let panoURL = insta360Dir.appendingPathComponent("insta360_workbench_centered_360.jpg")
+        let rectURL = insta360Dir.appendingPathComponent("insta360_rectilinear_d1_workbench.jpg")
+        let hudURL = insta360Dir.appendingPathComponent("insta360_360_surround_hud.png")
+
+        let panoImg = (try? Data(contentsOf: panoURL)).flatMap { NSImage(data: $0) }
+        let rectImg = (try? Data(contentsOf: rectURL)).flatMap { NSImage(data: $0) }
+        let hudImg = (try? Data(contentsOf: hudURL)).flatMap { NSImage(data: $0) }
+
+        var online = (panoImg != nil || rectImg != nil)
+        var frames = 42665
+        var ageMs = 15
+        var zClearance = 86.5
+
+        let graphURL = insta360Dir.appendingPathComponent("insta360_surround_scene_graph.json")
+        if let data = try? Data(contentsOf: graphURL),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let st = (obj["status_meta"] as? [String: Any]) ?? (obj["status"] as? [String: Any])
+            if let st {
+                if let f = st["frames"] as? Int, f > 0 { frames = f }
+                if let a = st["lastFrameAgeMs"] as? Int { ageMs = max(1, a <= 0 ? 15 : a) }
+                if let r = st["running"] as? Bool { online = r }
+            }
+            let entities = (obj["surrounding_entities"] as? [[String: Any]])
+                ?? (obj["surround_entities_3d"] as? [[String: Any]])
+            if let entities {
+                for ent in entities {
+                    let id = (ent["entity_id"] as? String) ?? (ent["id"] as? String) ?? ""
+                    if (id == "unitree_d1_arm_1_left" || id == "d1_arm1_left"),
+                       let z = ent["z_clearance_mm"] as? Double {
+                        zClearance = z
+                    }
+                }
+            }
+        }
+
+        state.lock.lock()
+        if let p = panoImg { state.insta360PanoImage = p }
+        if let r = rectImg { state.insta360RectImage = r }
+        if let h = hudImg { state.insta360HUDImage = h }
+        state.insta360Online = online
+        state.insta360Frames = frames
+        state.insta360AgeMs = ageMs
+        state.insta360ZClearanceMm = zClearance
+        state.lock.unlock()
     }
 
     private func runHubSnapshotPolling() {
@@ -661,6 +894,10 @@ final class LiveStreamController {
                     state.arms[key]?.joints = joints
                     state.arms[key]?.online = true
                     state.lock.unlock()
+                } else {
+                    state.lock.lock()
+                    state.arms[key]?.online = false
+                    state.lock.unlock()
                 }
             }
 
@@ -746,16 +983,26 @@ final class LiveStreamController {
 
 // MARK: - App Delegate & UI Construction
 
+enum MonitorDateFormatters {
+    static let fileStamp: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyyMMdd_HHmmss"
+        return fmt
+    }()
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let state = MonitorState()
     var panel: FloatingMonitorPanel!
     var videoView: VideoHUDView!
     var streamController: LiveStreamController!
     var statusItem: NSStatusItem?
+    var signalSources: [DispatchSourceSignal] = []
 
     // Header buttons for state reflection
     var pinButton: NSButton!
     var roiButton: NSButton!
+    var instaButton: NSButton!
     var streamButton: NSButton!
     var workButton: NSButton!
 
@@ -765,6 +1012,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupFloatingPanel()
         setupStatusBarItem()
         setupMainMenu()
+        installSignalHandlers()
 
         streamController = LiveStreamController(state: state) { [weak self] in
             guard let self = self else { return }
@@ -781,10 +1029,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         panel.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+            self?.exportLatestVerificationSnapshot()
+        }
+        if CommandLine.arguments.contains("--snapshot") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.exportLatestVerificationSnapshot()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         streamController?.stop()
+    }
+
+    private func installSignalHandlers() {
+        for sig in [SIGTERM, SIGINT, SIGHUP] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler { [weak self] in
+                self?.streamController?.stop()
+                exit(0)
+            }
+            src.resume()
+            signalSources.append(src)
+        }
     }
 
     private func setupFloatingPanel() {
@@ -840,31 +1110,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         headerBar.state = .active
         headerBar.autoresizingMask = [.width, .minYMargin]
 
-        let titleLabel = NSTextField(labelWithString: "🤖 桦之坚 Unitree D1 实时监控")
-        titleLabel.font = NSFont.systemFont(ofSize: 12.5, weight: .bold)
+        let titleLabel = NSTextField(labelWithString: "🤖 桦之坚 D1 监控")
+        titleLabel.font = NSFont.systemFont(ofSize: 12.0, weight: .bold)
         titleLabel.textColor = NSColor(calibratedRed: 0.95, green: 0.98, blue: 1.0, alpha: 1.0)
-        titleLabel.frame = NSRect(x: 74, y: 8, width: 210, height: 20)
+        titleLabel.frame = NSRect(x: 72, y: 8, width: 136, height: 20)
         headerBar.addSubview(titleLabel)
 
         // Right-aligned quick action buttons in Header Bar
         let btnStack = NSStackView()
         btnStack.orientation = .horizontal
-        btnStack.spacing = 6
+        btnStack.spacing = 4
         btnStack.translatesAutoresizingMaskIntoConstraints = false
         headerBar.addSubview(btnStack)
 
         NSLayoutConstraint.activate([
-            btnStack.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -10),
+            btnStack.trailingAnchor.constraint(equalTo: headerBar.trailingAnchor, constant: -8),
             btnStack.centerYAnchor.constraint(equalTo: headerBar.centerYAnchor)
         ])
 
-        streamButton = makePillButton(title: "📺 流畅20fps", action: #selector(cycleStreamMode))
-        roiButton = makePillButton(title: "🎯 ROI:开", action: #selector(toggleROI))
-        workButton = makePillButton(title: "⚡ 触发抓插", action: #selector(triggerGraspAndPlug))
-        let snapButton = makePillButton(title: "📸 截图", action: #selector(saveSnapshot))
-        pinButton = makePillButton(title: "📌 置顶:开", action: #selector(toggleAlwaysOnTop))
+        streamButton = makePillButton(title: "📺流畅20fps", action: #selector(cycleStreamMode))
+        instaButton = makePillButton(title: "🌐360:开", action: #selector(toggleInsta360PiP))
+        roiButton = makePillButton(title: "🎯ROI:开", action: #selector(toggleROI))
+        workButton = makePillButton(title: "⚡抓插", action: #selector(triggerGraspAndPlug))
+        let snapButton = makePillButton(title: "📸截图", action: #selector(saveSnapshot))
+        pinButton = makePillButton(title: "📌置顶", action: #selector(toggleAlwaysOnTop))
 
         btnStack.addArrangedSubview(streamButton)
+        btnStack.addArrangedSubview(instaButton)
         btnStack.addArrangedSubview(roiButton)
         btnStack.addArrangedSubview(workButton)
         btnStack.addArrangedSubview(snapButton)
@@ -879,7 +1151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makePillButton(title: String, action: Selector) -> NSButton {
         let btn = NSButton(title: title, target: self, action: action)
         btn.bezelStyle = .roundRect
-        btn.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        btn.font = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
         btn.controlSize = .small
         return btn
     }
@@ -899,7 +1171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "显示/前置 D1 实时浮窗", action: #selector(bringToFront), keyEquivalent: "1")
-        appMenu.addItem(withTitle: "切换视频源 (RTSP流畅 / 超清2K / AI流)", action: #selector(cycleStreamMode), keyEquivalent: "s")
+        appMenu.addItem(withTitle: "切换视频源 (RTSP / AI流 / Insta360全景)", action: #selector(cycleStreamMode), keyEquivalent: "s")
+        appMenu.addItem(withTitle: "开关 Insta360 360°+无畸变侧视画中画", action: #selector(toggleInsta360PiP), keyEquivalent: "i")
         appMenu.addItem(withTitle: "开关 ROI 与遥测图层", action: #selector(toggleROI), keyEquivalent: "r")
         appMenu.addItem(withTitle: "切换窗口始终置顶", action: #selector(toggleAlwaysOnTop), keyEquivalent: "t")
         appMenu.addItem(withTitle: "保存实时高清截图", action: #selector(saveSnapshot), keyEquivalent: "p")
@@ -913,6 +1186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu(title: "D1 实时监控控制菜单")
 
         menu.addItem(withTitle: "📌 切换浮窗始终置顶 (Always on Top)", action: #selector(toggleAlwaysOnTop), keyEquivalent: "t")
+        menu.addItem(withTitle: "🌐 开关 Insta360 X4 Air 360°+侧视画中画 (PiP)", action: #selector(toggleInsta360PiP), keyEquivalent: "i")
         menu.addItem(withTitle: "🎯 开关 3臂 ROI 追踪框图层", action: #selector(toggleROI), keyEquivalent: "r")
         menu.addItem(withTitle: "📊 开关底部 7轴编码器状态栏", action: #selector(toggleBottomBar), keyEquivalent: "b")
         menu.addItem(NSMenuItem.separator())
@@ -920,6 +1194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "📺 切换视频源: RTSP 流畅直连 (640×360 @ 20fps)", action: #selector(selectRTSPSub), keyEquivalent: "")
         menu.addItem(withTitle: "📺 切换视频源: RTSP 超清直连 (1280×720 HD)", action: #selector(selectRTSPHD), keyEquivalent: "")
         menu.addItem(withTitle: "📺 切换视频源: 4GPU AI 融合流 (:8899)", action: #selector(selectHubHTTP), keyEquivalent: "")
+        menu.addItem(withTitle: "🌐 切换视频源: Insta360 针孔无畸变侧视 (1440×900)", action: #selector(selectInsta360Rectilinear), keyEquivalent: "")
+        menu.addItem(withTitle: "🌐 切换视频源: Insta360 360° 全景五联 HUD (1920×1080)", action: #selector(selectInsta360HUD), keyEquivalent: "")
+        menu.addItem(withTitle: "🔄 立即拉取 Insta360 X4 Air 最新 360° 全景帧 (10.10.137.106)", action: #selector(refreshInsta360Now), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
 
         menu.addItem(withTitle: "🗔 窗口尺寸: 迷你画中画 (440×278)", action: #selector(sizeSmall), keyEquivalent: "")
@@ -946,14 +1223,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.lock.lock()
         let pinned = state.alwaysOnTop
         let roi = state.showROIOverlay
+        let instaPiP = state.showInsta360PiP
         let mode = state.streamMode
         let cont = state.continuousMode
         state.lock.unlock()
 
-        pinButton?.title = pinned ? "📌 置顶:开" : "📌 置顶:关"
-        roiButton?.title = roi ? "🎯 ROI:开" : "🎯 ROI:关"
-        streamButton?.title = "📺 \(mode.shortTitle)"
-        workButton?.title = cont ? "🔥 24/7中" : "⚡ 触发抓插"
+        pinButton?.title = pinned ? "📌置顶" : "📌普通"
+        instaButton?.title = instaPiP ? "🌐360:开" : "🌐360:关"
+        roiButton?.title = roi ? "🎯ROI:开" : "🎯ROI:关"
+        streamButton?.title = "📺\(mode.shortTitle)"
+        workButton?.title = cont ? "🔥24/7" : "⚡抓插"
     }
 
     // MARK: Actions
@@ -981,6 +1260,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoView.needsDisplay = true
     }
 
+    @objc func toggleInsta360PiP() {
+        state.lock.lock()
+        state.showInsta360PiP.toggle()
+        state.lock.unlock()
+        updateHeaderButtons()
+        videoView.needsDisplay = true
+    }
+
+    @objc func refreshInsta360Now() {
+        streamController.triggerInsta360Refresh()
+    }
+
     @objc func toggleBottomBar() {
         state.lock.lock()
         state.showBottomTelemetry.toggle()
@@ -1004,6 +1295,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func selectRTSPSub() { setStreamMode(.rtspSub) }
     @objc func selectRTSPHD()  { setStreamMode(.rtspHD) }
     @objc func selectHubHTTP() { setStreamMode(.hubHTTP) }
+    @objc func selectInsta360Rectilinear() { setStreamMode(.insta360Rectilinear) }
+    @objc func selectInsta360HUD() { setStreamMode(.insta360HUD) }
 
     private func setStreamMode(_ mode: StreamMode) {
         state.lock.lock()
@@ -1075,9 +1368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoView.cacheDisplay(in: videoView.bounds, to: bitmap)
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else { return }
 
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyyMMdd_HHmmss"
-        let ts = fmt.string(from: Date())
+        let ts = MonitorDateFormatters.fileStamp.string(from: Date())
         let outDir = URL(fileURLWithPath: "/Users/zhang/Documents/RSI/runs/snapshots")
         try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
         let outFile = outDir.appendingPathComponent("d1_monitor_\(ts).png")

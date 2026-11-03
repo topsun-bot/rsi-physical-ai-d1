@@ -1,0 +1,375 @@
+{
+  "camera_host": "28163@10.10.137.106",
+  "proxy_jump": "dgx-spark",
+  "camera_model": "Insta360 X4 Air",
+  "usb_instance_id": "USB\\VID_2E1A&PID_0002\\IAFEA2510H4E6N",
+  "sdk_version": "CameraSDK 2.1.8 + MediaSDK 3.1.5",
+  "firmware_version": "v1.2.7",
+  "resolution_wh": [
+    1920,
+    960
+  ],
+  "fps": 30.0,
+  "status_meta": {
+    "frames": 2098,
+    "packets": 2111,
+    "lastTimestamp": 280576464,
+    "lastFrameAgeMs": 16,
+    "running": true
+  },
+  "status": {
+    "frames": 2098,
+    "packets": 2111,
+    "lastTimestamp": 280576464,
+    "lastFrameAgeMs": 16,
+    "running": true
+  },
+  "workbench_centered_360_path": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_workbench_centered_360.jpg",
+  "hud_panel_path": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_360_surround_hud.png",
+  "rectilinear_views": {
+    "d1_workbench": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_rectilinear_d1_workbench.jpg",
+    "d1_left_arm1": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_rectilinear_d1_left_arm1.jpg",
+    "d1_mid_right_arms": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_rectilinear_d1_mid_right_arms.jpg",
+    "lab_surround": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_rectilinear_lab_surround.jpg"
+  },
+  "surrounding_entities": [
+    {
+      "entity_id": "unitree_d1_arm_1_left",
+      "category": "manipulator_arm",
+      "azimuth_deg": 155.0,
+      "elevation_deg": -32.0,
+      "distance_m": 0.58,
+      "xyz_workbench_m": [
+        -0.42,
+        0.24,
+        0.215
+      ],
+      "z_clearance_mm": 86.5,
+      "safety_status": "ACTIVE_SAFE",
+      "description_zh": "左前侧 Unitree D1 机械臂 (10.10.137.101)，黄色 C 型夹具固定，末端悬停于黄黑目标块上方 86.5mm 处",
+      "id": "unitree_d1_arm_1_left",
+      "spherical_deg": {
+        "yaw": 155.0,
+        "pitch": -32.0,
+        "distance_m": 0.58
+      }
+    },
+    {
+      "entity_id": "yellow_black_target_cube_and_tag",
+      "category": "manipulation_target",
+      "azimuth_deg": 163.0,
+      "elevation_deg": -38.0,
+      "distance_m": 0.52,
+      "xyz_workbench_m": [
+        -0.28,
+        0.19,
+        0.042
+      ],
+      "z_clearance_mm": 42.0,
+      "safety_status": "TARGET_LOCKED",
+      "description_zh": "桌面黄黑立方体操作目标块与微型视觉定位块（高 42mm）",
+      "id": "yellow_black_target_cube_and_tag",
+      "spherical_deg": {
+        "yaw": 163.0,
+        "pitch": -38.0,
+        "distance_m": 0.52
+      }
+    },
+    {
+      "entity_id": "unitree_d1_arm_2_center",
+      "category": "manipulator_arm",
+      "azimuth_deg": -178.0,
+      "elevation_deg": -34.0,
+      "distance_m": 0.56,
+      "xyz_workbench_m": [
+        0.02,
+        0.25,
+        0.168
+      ],
+      "z_clearance_mm": 92.0,
+      "safety_status": "ACTIVE_SAFE",
+      "description_zh": "中位 Unitree D1 机械臂 (10.10.137.102)，正前方放置黑色多孔标定板，腕部姿态清晰无遮挡",
+      "id": "unitree_d1_arm_2_center",
+      "spherical_deg": {
+        "yaw": -178.0,
+        "pitch": -34.0,
+        "distance_m": 0.56
+      }
+    },
+    {
+      "entity_id": "black_calibration_plate",
+      "category": "calibration_fiducial",
+      "azimuth_deg": -168.0,
+      "elevation_deg": -42.0,
+      "distance_m": 0.46,
+      "xyz_workbench_m": [
+        0.11,
+        0.14,
+        0.008
+      ],
+      "z_clearance_mm": 8.0,
+      "safety_status": "CALIBRATED",
+      "description_zh": "桌面黑色多点标定板，用于俯视相机与 Insta360 侧视全景的外参刚体配准",
+      "id": "black_calibration_plate",
+      "spherical_deg": {
+        "yaw": -168.0,
+        "pitch": -42.0,
+        "distance_m": 0.46
+      }
+    },
+    {
+      "entity_id": "unitree_d1_arm_3_right",
+      "category": "manipulator_arm",
+      "azimuth_deg": -142.0,
+      "elevation_deg": -29.0,
+      "distance_m": 0.74,
+      "xyz_workbench_m": [
+        0.46,
+        0.26,
+        0.185
+      ],
+      "z_clearance_mm": 95.0,
+      "safety_status": "ACTIVE_SAFE",
+      "description_zh": "右侧 Unitree D1 机械臂 (10.10.137.103)，毗邻交换机与网线集线区，侧向无碰撞干涉",
+      "id": "unitree_d1_arm_3_right",
+      "spherical_deg": {
+        "yaw": -142.0,
+        "pitch": -29.0,
+        "distance_m": 0.74
+      }
+    },
+    {
+      "entity_id": "overhead_camera_tripod_stand",
+      "category": "sensor_fixture",
+      "azimuth_deg": 150.0,
+      "elevation_deg": -12.0,
+      "distance_m": 1.15,
+      "xyz_workbench_m": [
+        -0.62,
+        0.58,
+        0.88
+      ],
+      "z_clearance_mm": 340.0,
+      "safety_status": "STATIC_OBSTACLE_CLEAR",
+      "description_zh": "工作台外侧三脚架俯视相机支架与黑色背景屏，距离 1 号臂旋转包络面 340mm",
+      "id": "overhead_camera_tripod_stand",
+      "spherical_deg": {
+        "yaw": 150.0,
+        "pitch": -12.0,
+        "distance_m": 1.15
+      }
+    },
+    {
+      "entity_id": "unitree_go2_quadruped_robot",
+      "category": "surrounding_robot",
+      "azimuth_deg": 168.0,
+      "elevation_deg": -18.0,
+      "distance_m": 2.35,
+      "xyz_workbench_m": [
+        -0.35,
+        2.2,
+        -0.72
+      ],
+      "z_clearance_mm": 1450.0,
+      "safety_status": "STANDBY_FLOOR",
+      "description_zh": "实验室地面待机状态的 Unitree Go2 四足机器狗（位于工作台后方 2.35m 安全区）",
+      "id": "unitree_go2_quadruped_robot",
+      "spherical_deg": {
+        "yaw": 168.0,
+        "pitch": -18.0,
+        "distance_m": 2.35
+      }
+    },
+    {
+      "entity_id": "dual_arm_humanoid_platform",
+      "category": "surrounding_robot",
+      "azimuth_deg": 134.0,
+      "elevation_deg": -6.0,
+      "distance_m": 3.1,
+      "xyz_workbench_m": [
+        -1.95,
+        2.4,
+        0.45
+      ],
+      "z_clearance_mm": 1800.0,
+      "safety_status": "STANDBY_ADJACENT_BENCH",
+      "description_zh": "实验室左后方白色双臂具身操作平台，与当前 D1 工作台完全物理隔离",
+      "id": "dual_arm_humanoid_platform",
+      "spherical_deg": {
+        "yaw": 134.0,
+        "pitch": -6.0,
+        "distance_m": 3.1
+      }
+    }
+  ],
+  "surround_entities_3d": [
+    {
+      "entity_id": "unitree_d1_arm_1_left",
+      "category": "manipulator_arm",
+      "azimuth_deg": 155.0,
+      "elevation_deg": -32.0,
+      "distance_m": 0.58,
+      "xyz_workbench_m": [
+        -0.42,
+        0.24,
+        0.215
+      ],
+      "z_clearance_mm": 86.5,
+      "safety_status": "ACTIVE_SAFE",
+      "description_zh": "左前侧 Unitree D1 机械臂 (10.10.137.101)，黄色 C 型夹具固定，末端悬停于黄黑目标块上方 86.5mm 处",
+      "id": "unitree_d1_arm_1_left",
+      "spherical_deg": {
+        "yaw": 155.0,
+        "pitch": -32.0,
+        "distance_m": 0.58
+      }
+    },
+    {
+      "entity_id": "yellow_black_target_cube_and_tag",
+      "category": "manipulation_target",
+      "azimuth_deg": 163.0,
+      "elevation_deg": -38.0,
+      "distance_m": 0.52,
+      "xyz_workbench_m": [
+        -0.28,
+        0.19,
+        0.042
+      ],
+      "z_clearance_mm": 42.0,
+      "safety_status": "TARGET_LOCKED",
+      "description_zh": "桌面黄黑立方体操作目标块与微型视觉定位块（高 42mm）",
+      "id": "yellow_black_target_cube_and_tag",
+      "spherical_deg": {
+        "yaw": 163.0,
+        "pitch": -38.0,
+        "distance_m": 0.52
+      }
+    },
+    {
+      "entity_id": "unitree_d1_arm_2_center",
+      "category": "manipulator_arm",
+      "azimuth_deg": -178.0,
+      "elevation_deg": -34.0,
+      "distance_m": 0.56,
+      "xyz_workbench_m": [
+        0.02,
+        0.25,
+        0.168
+      ],
+      "z_clearance_mm": 92.0,
+      "safety_status": "ACTIVE_SAFE",
+      "description_zh": "中位 Unitree D1 机械臂 (10.10.137.102)，正前方放置黑色多孔标定板，腕部姿态清晰无遮挡",
+      "id": "unitree_d1_arm_2_center",
+      "spherical_deg": {
+        "yaw": -178.0,
+        "pitch": -34.0,
+        "distance_m": 0.56
+      }
+    },
+    {
+      "entity_id": "black_calibration_plate",
+      "category": "calibration_fiducial",
+      "azimuth_deg": -168.0,
+      "elevation_deg": -42.0,
+      "distance_m": 0.46,
+      "xyz_workbench_m": [
+        0.11,
+        0.14,
+        0.008
+      ],
+      "z_clearance_mm": 8.0,
+      "safety_status": "CALIBRATED",
+      "description_zh": "桌面黑色多点标定板，用于俯视相机与 Insta360 侧视全景的外参刚体配准",
+      "id": "black_calibration_plate",
+      "spherical_deg": {
+        "yaw": -168.0,
+        "pitch": -42.0,
+        "distance_m": 0.46
+      }
+    },
+    {
+      "entity_id": "unitree_d1_arm_3_right",
+      "category": "manipulator_arm",
+      "azimuth_deg": -142.0,
+      "elevation_deg": -29.0,
+      "distance_m": 0.74,
+      "xyz_workbench_m": [
+        0.46,
+        0.26,
+        0.185
+      ],
+      "z_clearance_mm": 95.0,
+      "safety_status": "ACTIVE_SAFE",
+      "description_zh": "右侧 Unitree D1 机械臂 (10.10.137.103)，毗邻交换机与网线集线区，侧向无碰撞干涉",
+      "id": "unitree_d1_arm_3_right",
+      "spherical_deg": {
+        "yaw": -142.0,
+        "pitch": -29.0,
+        "distance_m": 0.74
+      }
+    },
+    {
+      "entity_id": "overhead_camera_tripod_stand",
+      "category": "sensor_fixture",
+      "azimuth_deg": 150.0,
+      "elevation_deg": -12.0,
+      "distance_m": 1.15,
+      "xyz_workbench_m": [
+        -0.62,
+        0.58,
+        0.88
+      ],
+      "z_clearance_mm": 340.0,
+      "safety_status": "STATIC_OBSTACLE_CLEAR",
+      "description_zh": "工作台外侧三脚架俯视相机支架与黑色背景屏，距离 1 号臂旋转包络面 340mm",
+      "id": "overhead_camera_tripod_stand",
+      "spherical_deg": {
+        "yaw": 150.0,
+        "pitch": -12.0,
+        "distance_m": 1.15
+      }
+    },
+    {
+      "entity_id": "unitree_go2_quadruped_robot",
+      "category": "surrounding_robot",
+      "azimuth_deg": 168.0,
+      "elevation_deg": -18.0,
+      "distance_m": 2.35,
+      "xyz_workbench_m": [
+        -0.35,
+        2.2,
+        -0.72
+      ],
+      "z_clearance_mm": 1450.0,
+      "safety_status": "STANDBY_FLOOR",
+      "description_zh": "实验室地面待机状态的 Unitree Go2 四足机器狗（位于工作台后方 2.35m 安全区）",
+      "id": "unitree_go2_quadruped_robot",
+      "spherical_deg": {
+        "yaw": 168.0,
+        "pitch": -18.0,
+        "distance_m": 2.35
+      }
+    },
+    {
+      "entity_id": "dual_arm_humanoid_platform",
+      "category": "surrounding_robot",
+      "azimuth_deg": 134.0,
+      "elevation_deg": -6.0,
+      "distance_m": 3.1,
+      "xyz_workbench_m": [
+        -1.95,
+        2.4,
+        0.45
+      ],
+      "z_clearance_mm": 1800.0,
+      "safety_status": "STANDBY_ADJACENT_BENCH",
+      "description_zh": "实验室左后方白色双臂具身操作平台，与当前 D1 工作台完全物理隔离",
+      "id": "dual_arm_humanoid_platform",
+      "spherical_deg": {
+        "yaw": 134.0,
+        "pitch": -6.0,
+        "distance_m": 3.1
+      }
+    }
+  ]
+}

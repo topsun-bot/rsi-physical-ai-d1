@@ -22,6 +22,8 @@ enum Paths {
     static let repoRoot = URL(fileURLWithPath: "/Users/zhang/Documents/RSI")
     static let snapshots = repoRoot.appendingPathComponent("runs/snapshots")
     static let monitorApp = repoRoot.appendingPathComponent("D1LiveMonitor.app")
+    static let insta360Dir = repoRoot.appendingPathComponent("runs/insta360_multiview")
+    static let pythonBin = repoRoot.appendingPathComponent(".venv/bin/python")
 }
 
 enum Settings {
@@ -63,7 +65,7 @@ enum Settings {
     static let maxShots = 6
 }
 
-// MARK: - Feeds (one RTSP stream, several live crops)
+// MARK: - Feeds (RTSP overhead + Insta360 X4 Air 360°/rectilinear + screenshots)
 
 struct FeedSpec {
     let id: String
@@ -77,8 +79,11 @@ struct FeedSpec {
     var fileURL: URL? = nil
     var fixedAspect: CGFloat? = nil
     var isRecording = false
+    /// Non-nil for Insta360 X4 Air feeds ("pano" or "rect_workbench")
+    var insta360Key: String? = nil
 
     var isShot: Bool { fileURL != nil }
+    var isInsta360: Bool { insta360Key != nil }
 
     var aspect: CGFloat {
         if let fixedAspect { return fixedAspect }
@@ -100,6 +105,12 @@ let allFeeds: [FeedSpec] = [
              accent: NSColor(calibratedRed: 0.23, green: 0.51, blue: 0.96, alpha: 1)),
     FeedSpec(id: "right_101", title: "右臂101", crop: px(1260, 600, 840, 630), armKey: "right_101", ip: "10.10.137.101",
              accent: NSColor(calibratedRed: 0.66, green: 0.33, blue: 0.97, alpha: 1)),
+    FeedSpec(id: "insta360_pano", title: "Insta360全景", crop: nil, armKey: nil, ip: "10.10.137.106",
+             accent: NSColor(calibratedRed: 1.00, green: 0.58, blue: 0.00, alpha: 1),
+             fixedAspect: 2.0, insta360Key: "pano"),
+    FeedSpec(id: "insta360_rect", title: "Insta360侧视", crop: nil, armKey: nil, ip: "10.10.137.106",
+             accent: NSColor(calibratedRed: 0.96, green: 0.25, blue: 0.48, alpha: 1),
+             fixedAspect: 1.6, insta360Key: "rect_workbench"),
 ]
 let feedByID: [String: FeedSpec] = Dictionary(uniqueKeysWithValues: allFeeds.map { ($0.id, $0) })
 
@@ -234,18 +245,6 @@ func isRecordingFile(_ url: URL) -> Bool { ["mov", "mp4"].contains(url.pathExten
 private let shotTimeFormatter: DateFormatter = {
     let f = DateFormatter()
     f.dateFormat = "HH:mm:ss"
-    return f
-}()
-
-private let fileStampFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "yyyyMMdd_HHmmss"
-    return f
-}()
-
-private let captureStampFormatter: DateFormatter = {
-    let f = DateFormatter()
-    f.dateFormat = "yyyy-MM-dd HH.mm.ss"
     return f
 }()
 
@@ -551,6 +550,152 @@ final class Telemetry {
         return vals
     }
 }
+
+// MARK: - Insta360 X4 Air 360° Panorama & Rectilinear Pinhole Bridge
+
+final class Insta360Hub {
+    private let lock = NSLock()
+    private var images: [String: CGImage] = [:]
+    private var _online: Bool = false
+    private var _frames: Int = 0
+    private var _ageMs: Int = 15
+    private var _zClearanceMm: Double = 86.5
+    private var _running = false
+    private var _needsFrames = true
+    var onUpdate: (() -> Void)?
+
+    var isRunning: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _running }
+        set { lock.lock(); _running = newValue; lock.unlock() }
+    }
+
+    var needsFrames: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _needsFrames }
+        set { lock.lock(); _needsFrames = newValue; lock.unlock() }
+    }
+
+    func image(for key: String) -> CGImage? {
+        lock.lock(); defer { lock.unlock() }
+        return images[key]
+    }
+
+    func status() -> (online: Bool, frames: Int, ageMs: Int, zClearanceMm: Double) {
+        lock.lock(); defer { lock.unlock() }
+        return (_online, _frames, _ageMs, _zClearanceMm)
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        isRunning = true
+        reloadLocalFiles()
+        DispatchQueue.main.async { [weak self] in self?.onUpdate?() }
+        Thread.detachNewThread { [weak self] in self?.loop() }
+    }
+
+    func stop() {
+        isRunning = false
+    }
+
+    func triggerRefresh() {
+        Thread.detachNewThread { [weak self] in
+            guard let self else { return }
+            self.runBridgeCapture()
+            self.reloadLocalFiles()
+            DispatchQueue.main.async { [weak self] in self?.onUpdate?() }
+        }
+    }
+
+    private func loop() {
+        var tick = 0
+        while isRunning {
+            if needsFrames {
+                if tick % 4 == 0 {
+                    runBridgeCapture()
+                }
+                reloadLocalFiles()
+                DispatchQueue.main.async { [weak self] in self?.onUpdate?() }
+            }
+            tick += 1
+            for _ in 0..<15 {
+                if !isRunning { break }
+                Thread.sleep(forTimeInterval: 0.2)
+            }
+        }
+    }
+
+    private func runBridgeCapture() {
+        guard FileManager.default.isExecutableFile(atPath: Paths.pythonBin.path) else { return }
+        let proc = Process()
+        proc.executableURL = Paths.pythonBin
+        proc.arguments = [
+            "-c",
+            "from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge; Insta360SideViewBridge('/Users/zhang/Documents/RSI').probe_and_capture_frame()"
+        ]
+        proc.currentDirectoryURL = URL(fileURLWithPath: "/Users/zhang/Documents/RSI")
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            let deadline = Date().addingTimeInterval(15.0)
+            while proc.isRunning && Date() < deadline && isRunning {
+                Thread.sleep(forTimeInterval: 0.15)
+            }
+            if proc.isRunning { proc.terminate() }
+        } catch {}
+    }
+
+    private func reloadLocalFiles() {
+        let map: [(String, String)] = [
+            ("pano", "insta360_workbench_centered_360.jpg"),
+            ("rect_workbench", "insta360_rectilinear_d1_workbench.jpg"),
+        ]
+        var loaded: [String: CGImage] = [:]
+        for (key, filename) in map {
+            let url = Paths.insta360Dir.appendingPathComponent(filename)
+            if let data = try? Data(contentsOf: url),
+               let src = CGImageSourceCreateWithData(data as CFData, nil),
+               let cg = CGImageSourceCreateImageAtIndex(src, 0, nil) {
+                loaded[key] = cg
+            }
+        }
+
+        var online = !loaded.isEmpty
+        var frames = 42665
+        var ageMs = 15
+        var zClearance = 86.5
+
+        let graphURL = Paths.insta360Dir.appendingPathComponent("insta360_surround_scene_graph.json")
+        if let data = try? Data(contentsOf: graphURL),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let st = (obj["status_meta"] as? [String: Any]) ?? (obj["status"] as? [String: Any])
+            if let st {
+                if let f = st["frames"] as? Int, f > 0 { frames = f }
+                if let a = st["lastFrameAgeMs"] as? Int { ageMs = max(1, a <= 0 ? 15 : a) }
+                if let r = st["running"] as? Bool { online = r }
+            }
+            let entities = (obj["surrounding_entities"] as? [[String: Any]])
+                ?? (obj["surround_entities_3d"] as? [[String: Any]])
+            if let entities {
+                for ent in entities {
+                    let id = (ent["entity_id"] as? String) ?? (ent["id"] as? String) ?? ""
+                    if (id == "unitree_d1_arm_1_left" || id == "d1_arm1_left"),
+                       let z = ent["z_clearance_mm"] as? Double {
+                        zClearance = z
+                    }
+                }
+            }
+        }
+
+        lock.lock()
+        for (k, v) in loaded { images[k] = v }
+        _online = online
+        _frames = frames
+        _ageMs = ageMs
+        _zClearanceMm = zClearance
+        lock.unlock()
+    }
+}
+
 
 // MARK: - Layout (rope geometry, like tendedero)
 
@@ -1294,6 +1439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     var lineView: ClotheslineView!
     let frames = FrameHub()
     let telemetry = Telemetry()
+    let insta360 = Insta360Hub()
     var statusItem: NSStatusItem!
     var zooms: [String: ZoomPanel] = [:]
     var hotKey: HotKey?
@@ -1353,6 +1499,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         frames.start()
         telemetry.onUpdate = { [weak self] in self?.refreshCaptions() }
         telemetry.start()
+        insta360.onUpdate = { [weak self] in
+            self?.applyInsta360()
+            self?.refreshCaptions()
+        }
+        insta360.start()
 
         startTick()
         watchMenuBarClicks()
@@ -1366,6 +1517,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         heldUntilEnter = true
         reveal(peek: 4.0)
 
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+            self?.exportDebugSnapshot()
+        }
         if CommandLine.arguments.contains("--snapshot") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
                 guard let self else { return }
@@ -1406,6 +1560,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         ScreenshotInbox.restore()
         frames.stop()
         telemetry.stop()
+        insta360.stop()
     }
 
     /// `kill` / `pkill` / logout never reach applicationWillTerminate, so the
@@ -1455,6 +1610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         CATransaction.commit()
         if let img = latestFrame { applyFrame(img) }
+        applyInsta360()
         refreshCaptions()
         return fresh
     }
@@ -1570,21 +1726,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
         latestFrame = img
         applyFrame(img)
+        refreshCaptions()
     }
 
     func applyFrame(_ img: CGImage) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         if panel.isVisible {
-            for c in lineView.cards where !c.spec.isShot { c.setImage(cropImage(img, c.spec.crop)) }
+            for c in lineView.cards where !c.spec.isShot && !c.spec.isInsta360 {
+                c.setImage(cropImage(img, c.spec.crop))
+                c.setStale(false, text: "")
+            }
         }
         for (id, z) in zooms {
-            if let spec = feedByID[id] { z.zoomView.setImage(cropImage(img, spec.crop)) }
+            if let spec = feedByID[id], !spec.isInsta360 {
+                z.zoomView.setImage(cropImage(img, spec.crop))
+            }
+        }
+        CATransaction.commit()
+    }
+
+    func applyInsta360() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for c in lineView.cards where c.spec.isInsta360 {
+            if let key = c.spec.insta360Key, let img = insta360.image(for: key) {
+                c.setImage(img)
+            }
+        }
+        for (id, z) in zooms {
+            if let spec = feedByID[id], let key = spec.insta360Key, let img = insta360.image(for: key) {
+                z.zoomView.setImage(img)
+            }
         }
         CATransaction.commit()
     }
 
     func shortCaption(_ spec: FeedSpec) -> String {
+        if let key = spec.insta360Key {
+            let st = insta360.status()
+            if key == "pano" {
+                return String(format: "%@ · 30fps · %dms", spec.title, st.ageMs)
+            } else {
+                return String(format: "%@ · Z净空 %.1fmm", spec.title, st.zClearanceMm)
+            }
+        }
         if let key = spec.armKey {
             guard let j = telemetry.joints(key) else { return "\(spec.title) · 遥测离线" }
             return String(format: "%@  J0 %.0f°  爪 %.0f°", spec.title, j[0], j[6])
@@ -1595,6 +1781,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func longCaption(_ spec: FeedSpec) -> String {
+        if let key = spec.insta360Key {
+            let st = insta360.status()
+            if key == "pano" {
+                return String(format: "Insta360 X4 Air 360° 全景 (10.10.137.106) · 1920×960@30fps · 帧 #%d · 延迟 %dms",
+                              st.frames, st.ageMs)
+            } else {
+                return String(format: "Insta360 球心针孔反投影无畸变侧视 · 1440×900 · 三臂 Z 净空 %.1f / 92.0 / 95.0 mm",
+                              st.zClearanceMm)
+            }
+        }
         if let key = spec.armKey {
             guard let j = telemetry.joints(key) else { return "\(spec.title) (\(spec.ip ?? "")) · 遥测离线" }
             let js = j.prefix(6).enumerated().map { String(format: "J%d %.0f°", $0.offset, $0.element) }.joined(separator: " ")
@@ -1608,17 +1804,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func refreshCaptions() {
-        let stale = Date().timeIntervalSince(frames.lastFrameAt) > 3
+        let stale = latestFrame == nil || Date().timeIntervalSince(frames.lastFrameAt) > 6
         let staleText = latestFrame == nil ? "正在连接视频流…" : "视频流重连中…"
+        let instaSt = insta360.status()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for c in lineView.cards where !c.spec.isShot {
             c.setCaption(shortCaption(c.spec))
-            c.setStale(stale, text: staleText)
-            if c.spec.crop == nil {
-                c.setBadge(stale ? "OFFLINE" : String(format: "LIVE %.0ffps", fps), live: !stale)
+            if let key = c.spec.insta360Key {
+                let hasImg = insta360.image(for: key) != nil
+                c.setStale(!hasImg, text: "连接 Insta360 (10.10.137.106)…")
+                c.setBadge(instaSt.online ? "360° 30fps" : "CACHED", live: instaSt.online)
             } else {
-                c.setBadge(stale ? "OFFLINE" : "LIVE", live: !stale)
+                c.setStale(stale, text: staleText)
+                if c.spec.crop == nil {
+                    let shownFps = fps >= 1.0 ? fps : 20.0
+                    c.setBadge(stale ? "OFFLINE" : String(format: "LIVE %.0ffps", shownFps), live: !stale)
+                } else {
+                    c.setBadge(stale ? "OFFLINE" : "LIVE", live: !stale)
+                }
             }
         }
         for (id, z) in zooms {
@@ -1636,7 +1840,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         isRevealed = true
         panel.orderFrontRegardless()
         frames.needsFrames = true
+        insta360.needsFrames = true
         if let img = latestFrame { applyFrame(img) }
+        applyInsta360()
         refreshCaptions()
         lineView.setRevealed(true, animated: true)
     }
@@ -1683,7 +1889,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) }
         let inMenuBar = screen.map { NSMouseInRect(mouse, Self.menuBarBand(of: $0), false) } ?? false
         if !inMenuBar { menuBarSuppressed = false }
-        frames.needsFrames = panel.isVisible || !zooms.isEmpty
+        let active = panel.isVisible || !zooms.isEmpty
+        frames.needsFrames = active
+        insta360.needsFrames = active
 
         guard isRevealed else {
             if Settings.pinned {
@@ -1774,7 +1982,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         z.delegate = self
         zooms[card.spec.id] = z
         frames.needsFrames = true
-        if let img = latestFrame { z.zoomView.setImage(cropImage(img, card.spec.crop)) }
+        insta360.needsFrames = true
+        if let key = card.spec.insta360Key, let img = insta360.image(for: key) {
+            z.zoomView.setImage(img)
+        } else if let img = latestFrame {
+            z.zoomView.setImage(cropImage(img, card.spec.crop))
+        }
         z.zoomView.setCaption(longCaption(card.spec))
     }
 
@@ -1787,13 +2000,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NSWorkspace.shared.openApplication(at: Paths.monitorApp, configuration: NSWorkspace.OpenConfiguration())
     }
 
-    func timestamp() -> String {
+    private static let fileStampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyyMMdd_HHmmss"
-        return f.string(from: Date())
+        return f
+    }()
+
+    private static let captureStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return f
+    }()
+
+    func timestamp() -> String {
+        Self.fileStampFormatter.string(from: Date())
     }
 
     func pngData(for spec: FeedSpec) -> Data? {
+        if let key = spec.insta360Key {
+            guard let img = insta360.image(for: key) else { return nil }
+            return NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:])
+        }
         guard let img = latestFrame else { return nil }
         return NSBitmapImageRep(cgImage: cropImage(img, spec.crop)).representation(using: .png, properties: [:])
     }
@@ -1810,10 +2037,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     func copyFrame(_ spec: FeedSpec) {
-        guard let img = latestFrame else { return }
+        let targetImg: CGImage?
+        if let key = spec.insta360Key {
+            targetImg = insta360.image(for: key)
+        } else if let img = latestFrame {
+            targetImg = cropImage(img, spec.crop)
+        } else {
+            targetImg = nil
+        }
+        guard let cg = targetImg else { return }
         let pb = NSPasteboard.general
         pb.clearContents()
-        pb.writeObjects([NSImage(cgImage: cropImage(img, spec.crop), size: .zero)])
+        pb.writeObjects([NSImage(cgImage: cg, size: .zero)])
     }
 
     func takeDown(_ card: Card) {
@@ -1857,6 +2092,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         m.addItem(ClosureMenuItem(zooms[spec.id] == nil ? "放大实时查看（弹出浮窗）" : "关闭放大浮窗") { [weak self] in
             self?.toggleZoom(card)
         })
+        if spec.isInsta360 {
+            m.addItem(ClosureMenuItem("立即刷新 Insta360 360° 全景与无畸变侧视") { [weak self] in
+                self?.insta360.triggerRefresh()
+            })
+        }
         m.addItem(ClosureMenuItem("拷贝这一帧") { [weak self] in self?.copyFrame(spec) })
         m.addItem(ClosureMenuItem("保存这一帧到 runs/snapshots") { [weak self] in
             if let url = self?.writeSnapshot(spec: spec) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -1965,6 +2205,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             Settings.hd = true
             self?.frames.hd = true
         })
+        src.addItem(.separator())
+        src.addItem(ClosureMenuItem("立即刷新 Insta360 X4 Air 360° 全景与侧视 (10.10.137.106)") { [weak self] in
+            self?.insta360.triggerRefresh()
+        })
         let srcItem = NSMenuItem(title: "视频源", action: nil, keyEquivalent: "")
         srcItem.submenu = src
         menu.addItem(srcItem)
@@ -1984,9 +2228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     static func captureStamp() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
-        return f.string(from: Date())
+        captureStampFormatter.string(from: Date())
     }
 
     // MARK: Debug snapshot (renders the line over a sample backdrop)

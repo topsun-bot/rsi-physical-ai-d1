@@ -33,7 +33,13 @@ if [[ "${1:-}" == "--rollback" ]]; then
     "${REPO_ROOT}/macos_monitor/build_app.sh"
     pkill -f "${PROC_PATTERN}" >/dev/null 2>&1 || true
     sleep 0.3
-    open -a "${APP_BUNDLE}"
+    if ! open -n -a "${APP_BUNDLE}" >/dev/null 2>&1; then
+        nohup "${APP_BUNDLE}/Contents/MacOS/D1Clothesline" >/dev/null 2>&1 &
+        disown || true
+    fi
+    if pgrep -f "D1LiveMonitor.app/Contents/MacOS/D1LiveMonitor" >/dev/null 2>&1; then
+        "${REPO_ROOT}/scripts/run_mac_floating_monitor.sh"
+    fi
     echo "✅ 已回退至 ${TARGET_TAG} 并重新启动 D1 视频晾衣绳"
     exit 0
 fi
@@ -46,5 +52,8 @@ fi
 
 pkill -f "${PROC_PATTERN}" >/dev/null 2>&1 || true
 sleep 0.3
-open -a "${APP_BUNDLE}" --args "$@"
+if ! open -n -a "${APP_BUNDLE}" --args "$@" >/dev/null 2>&1; then
+    nohup "${APP_BUNDLE}/Contents/MacOS/D1Clothesline" "$@" >/dev/null 2>&1 &
+    disown || true
+fi
 echo "✅ 已启动 D1 视频晾衣绳 — 鼠标停在屏幕顶部菜单栏（或按 ⌃⌥D）放下晾衣绳；退出：$0 --stop"
