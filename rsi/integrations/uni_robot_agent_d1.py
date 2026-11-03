@@ -1,4 +1,4 @@
-"""Reproduction of `uni-robot-agent` (arXiv:2611.01560) on Unitree D1 (D1-550) in Sim and 1F Real Hardware."""
+"""Reproduction of `uni-robot-agent` (arXiv:2611.01560) on Unitree D1 in Sim & 1F Hardware."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import cv2
 import numpy as np
@@ -200,7 +200,7 @@ def appendix_e_least_squares_triangulate(
 
     projectors = [np.eye(3, dtype=np.float64) - np.outer(ray_vec, ray_vec) for ray_vec in rays]
     lhs = sum(projectors)
-    rhs = sum(proj_mat @ orig_vec for proj_mat, orig_vec in zip(projectors, origins))
+    rhs = sum(proj_mat @ orig_vec for proj_mat, orig_vec in zip(projectors, origins, strict=True))
     point_xyz = np.linalg.solve(lhs, rhs)
 
     max_angle_deg = 0.0
@@ -232,13 +232,14 @@ def appendix_e_table_plane_sweep(
     t_world_from_optical: np.ndarray,
     z_candidates_m: list[float] | None = None,
 ) -> dict[str, list[float]]:
-    """Reproduce Appendix E single-view ray-plane intersection across candidate table/object heights."""
+    """Reproduce Appendix E single-view ray-plane intersection across candidate heights."""
     z_list = z_candidates_m or [0.015, 0.036, 0.055, 0.120]
     row, col = int(pixel_rc[0]), int(pixel_rc[1])
     k_mat = np.asarray(intrinsic_k, dtype=np.float64)
     t_wo = np.asarray(t_world_from_optical, dtype=np.float64)
     origin = t_wo[:3, 3]
-    ray_world = t_wo[:3, :3] @ np.linalg.solve(k_mat, np.array([float(col), float(row), 1.0], dtype=np.float64))
+    homog_px = np.array([float(col), float(row), 1.0], dtype=np.float64)
+    ray_world = t_wo[:3, :3] @ np.linalg.solve(k_mat, homog_px)
     ray_world = ray_world / np.linalg.norm(ray_world)
 
     intersections: dict[str, list[float]] = {}
@@ -321,7 +322,9 @@ class UniRobotAgentD1Harness:
 
         self.adapter = UnitreeD1EnvironmentAdapter(config)
         self.service_artifacts = ArtifactStore(self.output_dir / "service_artifacts")
-        self.service = EnvironmentService(self.adapter, self.adapter.episode_info(), self.service_artifacts)
+        self.service = EnvironmentService(
+            cast(Any, self.adapter), self.adapter.episode_info(), self.service_artifacts
+        )
         self.service.initialize()
 
         self.transport = InProcessEnvironmentTransport(self.service)
@@ -380,7 +383,7 @@ class UniRobotAgentD1Harness:
         }
 
     def run_closed_loop_pick_and_place(self) -> UniRobotAgentD1RunResult:
-        """Execute a closed-loop episode following the paper's Realistic RGB-triangulation + skill workflow."""
+        """Execute a closed-loop episode following the RGB-triangulation + skill workflow."""
         from uni_robot_agent.integrations.unitree_d1.environment.adapter import (
             project_world_point_to_pixel,
         )
@@ -412,14 +415,16 @@ class UniRobotAgentD1Harness:
         reproj_err_px: float | None = None
 
         if self.config.backend == "sim":
-            overhead_img = cv2.cvtColor(
-                cv2.imread(cam_calib["overhead"]["image_path"]),
-                cv2.COLOR_BGR2RGB,
-            )
-            front_img = cv2.cvtColor(
-                cv2.imread(cam_calib["front"]["image_path"]),
-                cv2.COLOR_BGR2RGB,
-            )
+            ov_path = str(cam_calib["overhead"]["image_path"])
+            fr_path = str(cam_calib["front"]["image_path"])
+            overhead_bgr = cv2.imread(ov_path)
+            front_bgr = cv2.imread(fr_path)
+            if overhead_bgr is None or front_bgr is None:
+                raise FileNotFoundError(
+                    f"Failed to read camera images: overhead={ov_path!r}, front={fr_path!r}"
+                )
+            overhead_img = cv2.cvtColor(overhead_bgr, cv2.COLOR_BGR2RGB)
+            front_img = cv2.cvtColor(front_bgr, cv2.COLOR_BGR2RGB)
             red_px_ov = detect_colored_object_pixel(overhead_img, "red")
             red_px_fr = detect_colored_object_pixel(front_img, "red")
             green_px_ov = detect_colored_object_pixel(overhead_img, "green")
@@ -499,7 +504,13 @@ class UniRobotAgentD1Harness:
             "move",
             {
                 "profile": "approach",
-                "targets": [{"arm": arm_name, "pose": [px, py, hover_z, 0.0, math.pi, 0.0], "gripper": 0.88}],
+                "targets": [
+                    {
+                        "arm": arm_name,
+                        "pose": [px, py, hover_z, 0.0, math.pi, 0.0],
+                        "gripper": 0.88,
+                    }
+                ],
                 "max_steps": 12,
             },
         )
@@ -509,7 +520,13 @@ class UniRobotAgentD1Harness:
             "move",
             {
                 "profile": "precision" if self.enable_skills else "standard",
-                "targets": [{"arm": arm_name, "pose": [px, py, grasp_z, 0.0, math.pi, 0.0], "gripper": 0.88}],
+                "targets": [
+                    {
+                        "arm": arm_name,
+                        "pose": [px, py, grasp_z, 0.0, math.pi, 0.0],
+                        "gripper": 0.88,
+                    }
+                ],
                 "max_steps": 18,
             },
         )
@@ -536,7 +553,9 @@ class UniRobotAgentD1Harness:
                 "max_steps": 12,
             },
         )
-        motion_trace.append({"stage": "transport_to_target", "feedback": r5["extra"].get("feedback")})
+        motion_trace.append(
+            {"stage": "transport_to_target", "feedback": r5["extra"].get("feedback")}
+        )
 
         r6 = self.call_tool(
             "move",
@@ -559,14 +578,19 @@ class UniRobotAgentD1Harness:
                 "max_steps": 8,
             },
         )
-        motion_trace.append({"stage": "post_place_retreat", "feedback": r8["extra"].get("feedback")})
+        motion_trace.append(
+            {"stage": "post_place_retreat", "feedback": r8["extra"].get("feedback")}
+        )
         self.call_tool("capture_scene", {"cameras": ["overhead", "front"]})
 
         self.call_tool(
             "finish",
             {
                 "status": "success",
-                "summary": "Completed RGB-triangulated pick-and-place with visual verification on Unitree D1.",
+                "summary": (
+                    "Completed RGB-triangulated pick-and-place with visual verification "
+                    "on Unitree D1."
+                ),
             },
         )
         outcome = self.episode.outcome or {}
@@ -599,7 +623,14 @@ class UniRobotAgentD1Harness:
         ]
         for idx in range(1, num_turns + 1):
             call_id = f"call_{idx:02d}"
-            items.append({"type": "function_call", "call_id": call_id, "name": "capture_scene", "arguments": "{}"})
+            items.append(
+                {
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": "capture_scene",
+                    "arguments": "{}",
+                }
+            )
             items.append(
                 {
                     "type": "function_call_output",
@@ -618,7 +649,11 @@ class UniRobotAgentD1Harness:
             for item in decision.request.items
             if isinstance(item, dict) and isinstance(item.get("output"), list)
             for block in item["output"]
-            if isinstance(block, dict) and block.get("type") == "input_text" and "[image omitted:" in block.get("text", "")
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "input_text"
+                and "[image omitted:" in block.get("text", "")
+            )
         ]
         remaining_images = sum(
             1

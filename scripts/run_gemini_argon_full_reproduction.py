@@ -27,29 +27,20 @@ import sys
 import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+if TYPE_CHECKING:
+    from rsi.control.argon_primitive_executor import SimRehearsedControlReport
+    from rsi.data_gen.argon_hindsight_generator import HindsightEpisodeRecord
+    from rsi.sim.insta360_perception_bridge import Insta360CaptureStatus
+    from rsi.sim.real2sim_generator import Real2SimSceneConfig
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-from rsi.control.argon_primitive_executor import (
-    GeminiArgonPrimitiveExecutor,
-    SimRehearsedControlReport,
-)
-from rsi.data_gen.argon_hindsight_generator import (
-    GeminiArgonHindsightGenerator,
-    HindsightEpisodeRecord,
-)
-from rsi.evolution.loop_engine import RSISelfEvolutionEngine
-from rsi.sim.insta360_perception_bridge import (
-    Insta360CaptureStatus,
-    Insta360SideViewBridge,
-)
-from rsi.sim.real2sim_generator import Real2SimSceneConfig
 
 logger = logging.getLogger(__name__)
 
@@ -855,10 +846,22 @@ def _render_four_pillar_poster(
     key_indices = (10, 34, 58, 88)
     quad_coords = ((24, 92), (812, 92), (24, 548), (812, 548))
     quad_titles = (
-        "支柱 1 — Insta360 X4 Air + Real2Sim：360°全景+针孔无畸变正侧视消盲区 + 自动生成 MuJoCo 场景",
-        "支柱 2 — 物理理解与数据合成：360°全景+左臂特写 + 0~100% 进度估计驱动 SmolVLA 成功率跃升",
-        "支柱 3 — 仿真预演与原语控制：中/右臂净空确认后 500Hz 仿真预演同步驱动 101/102/103 三臂真机",
-        "支柱 4 — 物理AI自进化闭环：Gen-0 (19.64mm) -> Gen-1 (3.11mm) -> Gen-2 (2.80mm / 94.78分)",
+        (
+            "支柱 1 — Insta360 X4 Air + Real2Sim："
+            "360°全景+针孔无畸变正侧视消盲区 + 自动生成 MuJoCo 场景"
+        ),
+        (
+            "支柱 2 — 物理理解与数据合成："
+            "360°全景+左臂特写 + 0~100% 进度估计驱动 SmolVLA 成功率跃升"
+        ),
+        (
+            "支柱 3 — 仿真预演与原语控制："
+            "中/右臂净空确认后 500Hz 仿真预演同步驱动 101/102/103 三臂真机"
+        ),
+        (
+            "支柱 4 — 物理AI自进化闭环："
+            "Gen-0 (19.64mm) -> Gen-1 (3.11mm) -> Gen-2 (2.80mm / 94.78分)"
+        ),
     )
     for k_idx, (qx, qy), q_title in zip(
         key_indices, quad_coords, quad_titles, strict=True
@@ -911,19 +914,31 @@ def render_4_pillar_showcase_video_and_poster(
     pillar_banners = (
         (
             "支柱 1 (Real2Sim 数字孪生)",
-            "Insta360 360°全景 + 针孔无畸变侧视 + 俯视三视角重建 MuJoCo 刚体，校准 86.5mm 安全净空",
+            (
+                "Insta360 360°全景 + 针孔无畸变侧视 + 俯视三视角重建 MuJoCo 刚体，"
+                "校准 86.5mm 安全净空"
+            ),
         ),
         (
             "支柱 2 (物理理解与数据合成)",
-            "Gemini 4 Argon 多模态事后标注 + 0~100% 进度估计，4gpu 4090 微调 SmolVLA 成功率 56%->78.5%",
+            (
+                "Gemini 4 Argon 多模态事后标注 + 0~100% 进度估计，"
+                "4gpu 4090 微调 SmolVLA 成功率 56%->78.5%"
+            ),
         ),
         (
             "支柱 3 (仿真预演零样本原语)",
-            "先在 500Hz 物理仿真核预演 5 个运动原语 (RMSE=2.70mm)，通过门禁后同步驱动 101/102/103 真机",
+            (
+                "先在 500Hz 物理仿真核预演 5 个运动原语 (RMSE=2.70mm)，"
+                "通过门禁后同步驱动 101/102/103 真机"
+            ),
         ),
         (
             "支柱 4 (多轮自进化闭环 RSI)",
-            "视觉+遥测根因诊断自动改写阻抗/负载观测器：Gen-0 (19.64mm拦截) -> Gen-1 (3.11mm) -> Gen-2 (2.80mm)",
+            (
+                "视觉+遥测根因诊断自动改写阻抗/负载观测器："
+                "Gen-0 (19.64mm拦截) -> Gen-1 (3.11mm) -> Gen-2 (2.80mm)"
+            ),
         ),
     )
 
@@ -1384,6 +1399,11 @@ def write_four_pillars_markdown_report(
 
 
 def main() -> None:
+    from rsi.control.argon_primitive_executor import GeminiArgonPrimitiveExecutor
+    from rsi.data_gen.argon_hindsight_generator import GeminiArgonHindsightGenerator
+    from rsi.evolution.loop_engine import RSISelfEvolutionEngine
+    from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge
+
     operation_id = f"argon-repro-{uuid.uuid4().hex[:8]}"
     out_dir = REPO_ROOT / "runs" / "argon_reproduction"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -108,7 +108,8 @@ def test_swift_sources_have_short_comments_and_no_single_letter_bindings() -> No
             if comment_match:
                 comment_body = comment_match.group(1).strip()
                 assert not comment_body.startswith("MARK:"), (
-                    f"{swift_file.name}:{line_no} contains section-divider comment: {comment_body!r}"
+                    f"{swift_file.name}:{line_no} contains section-divider comment: "
+                    f"{comment_body!r}"
                 )
                 assert len(comment_body) <= 20, (
                     f"{swift_file.name}:{line_no} comment exceeds 20 chars "

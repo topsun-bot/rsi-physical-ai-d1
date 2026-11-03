@@ -45,7 +45,8 @@ class SimulationValidator:
     ) -> tuple[SimVerificationResult, list[dict[str, Any]]]:
         if not candidate.ast_safety_passed:
             raise ValueError(
-                f"Cannot run simulation on AST-unsafe candidate {candidate.candidate_id}: {candidate.ast_audit_notes}"
+                f"Cannot run simulation on AST-unsafe candidate {candidate.candidate_id}: "
+                f"{candidate.ast_audit_notes}"
             )
 
         controller = self._load_controller_instance(candidate)
@@ -60,7 +61,8 @@ class SimulationValidator:
             p_apex = np.array(curr["p_apex_xyz_m"], dtype=np.float64)
             p_place = np.array(curr["p_place_xyz_m"], dtype=np.float64)
             payload_mass_kg = float(curr.get("estimated_payload_kg", 0.35))
-            backend_name = f"UnitreeD1_RK2_Lagrangian_500Hz (+Real2Sim MJCF: {Path(real2sim_scene.generated_mjcf_path).name})"
+            mjcf_name = Path(real2sim_scene.generated_mjcf_path).name
+            backend_name = f"UnitreeD1_RK2_Lagrangian_500Hz (+Real2Sim MJCF: {mjcf_name})"
         else:
             p_pick = np.array([0.36, 0.14, 0.055], dtype=np.float64)
             p_apex = np.array([0.35, -0.02, 0.195], dtype=np.float64)
@@ -91,9 +93,10 @@ class SimulationValidator:
 
         for step_idx in range(steps):
             t = step_idx * self.dt
-            x_ref, dx_ref, gripper_closed_cmd, true_payload_kg, ext_force = self._reference_schedule(
+            ref_sched = self._reference_schedule(
                 t, p_start, p_pick, p_apex, p_place, payload_mass_kg
             )
+            x_ref, dx_ref, gripper_closed_cmd, true_payload_kg, ext_force = ref_sched
 
             ee_pos, _ = self.plant.forward_kinematics(q)
             J_pos = self.plant.compute_position_jacobian(q)
@@ -123,7 +126,8 @@ class SimulationValidator:
             )
             step_compute_times_ms.append((time.perf_counter() - t0_perf) * 1000.0)
 
-            if 1.15 <= t <= 1.35 and float(np.linalg.norm(ee_pos - p_pick)) < 0.028 and gripper_mm < 35.0:
+            pick_dist = float(np.linalg.norm(ee_pos - p_pick))
+            if 1.15 <= t <= 1.35 and pick_dist < 0.028 and gripper_mm < 35.0:
                 grasp_triggered = True
 
             # Advance physical plant
@@ -164,12 +168,13 @@ class SimulationValidator:
             # Subsample trajectory every 20ms (50Hz) for DDS replay & evaluation artifacts
             if step_idx % 10 == 0 or step_idx == steps - 1:
                 q_deg = np.degrees(q).tolist()
+                q_deg_7d = [round(float(v), 2) for v in q_deg] + [round(float(gripper_mm), 2)]
                 trajectory_records.append(
                     {
                         "step": step_idx,
                         "t_sec": round(t, 3),
                         "q_rad": [round(float(v), 5) for v in q],
-                        "q_deg_7d": [round(float(v), 2) for v in q_deg] + [round(float(gripper_mm), 2)],
+                        "q_deg_7d": q_deg_7d,
                         "ee_xyz_m": [round(float(v), 4) for v in ee_after],
                         "ref_xyz_m": [round(float(v), 4) for v in x_ref],
                         "tracking_err_m": round(err, 5),
@@ -276,7 +281,7 @@ class SimulationValidator:
             step_compute_cost_ms=round(mean_step_cost_ms, 4),
         )
 
-        # Extract any new failure micro-sandboxes (`pack_diff`) into DSec bank for subsequent generations
+        # Extract new failure micro-sandboxes (`pack_diff`) into DSec bank for next generations
         if dsec_bank is not None:
             dsec_bank.pack_diff_from_generation(
                 candidate=candidate,
@@ -296,12 +301,12 @@ class SimulationValidator:
         p_place: np.ndarray,
     ) -> dict[str, Any]:
         """
-        Google Research RRSI (arXiv:2609.24972) Held-Out Out-Of-Distribution (OOD) Perturbation Suite:
+        Google Research RRSI (arXiv:2609.24972) Held-Out OOD Perturbation Suite:
           1) `ood_heavy_payload_0.48kg`: Near-rated-limit 0.48 kg load + lateral disturbance pulse
-          2) `ood_shifted_waypoints_15mm`: Pick/Place shifted by +12..-14mm in XY & +5mm in Z (prevents waypoint memorization)
-          3) `ood_light_payload_0.15kg_high_friction`: 0.15 kg light load with 1.35x Coulomb friction perturbation
+          2) `ood_shifted_waypoints_15mm`: Pick/Place shifted by +12..-14mm in XY & +5mm in Z
+          3) `ood_light_payload_0.15kg_high_friction`: 0.15 kg light load with 1.35x friction
         """
-        scenarios = [
+        scenarios: list[dict[str, Any]] = [
             {
                 "name": "ood_heavy_payload_0.48kg",
                 "p_pick": p_pick.copy(),
@@ -332,9 +337,10 @@ class SimulationValidator:
         scenario_scores: list[float] = []
         scenario_details: list[dict[str, Any]] = []
         passed_scenarios = 0
-        gate_limit = float(self.manifest.sim2real_gate["max_tracking_rmse_m"]) * 1.15  # 17.25mm OOD tolerance
+        # 17.25mm OOD tolerance
+        gate_limit = float(self.manifest.sim2real_gate["max_tracking_rmse_m"]) * 1.15
 
-        # Run critical pick-lift-transport window (t in [0.90s, 2.50s], 400 steps @ dt=0.004s) for fast & exact OOD check
+        # Run critical pick-lift-transport window (t in [0.90s, 2.50s], 400 steps @ dt=0.004s)
         dt_ood = 0.004
         ood_plant = UnitreeD1PhysicsPlant(dt=dt_ood)
         base_coulomb = ood_plant.coulomb_friction.copy()
@@ -347,7 +353,7 @@ class SimulationValidator:
             errs: list[float] = []
             violations = 0
 
-            # Simulate 0.0 -> 2.6s covering approach, 0.48kg/0.15kg grasp, lift apex & pulse disturbance
+            # Simulate 0.0 -> 2.6s covering approach, grasp, lift apex & pulse disturbance
             n_steps = int(2.60 / dt_ood)
             for idx in range(n_steps):
                 t = idx * dt_ood
