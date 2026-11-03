@@ -322,3 +322,88 @@ class TestInsta360PerceptionBridge:
             _ = sim_pkg.non_existent_symbol_xyz
         with pytest.raises(AttributeError):
             _ = int_pkg.non_existent_symbol_xyz
+
+    def test_reproduction_script_lazy_exports_without_pythonpath(self) -> None:
+        import os
+        import sys
+
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        script_dir = str(Path(__file__).resolve().parents[1] / "scripts")
+        check_code = (
+            "import run_gemini_argon_full_reproduction as repro; "
+            "assert 'GeminiArgonPrimitiveExecutor' in dir(repro); "
+            "assert repro.GeminiArgonPrimitiveExecutor is not None; "
+            "assert repro.SimRehearsedControlReport is not None; "
+            "assert repro.GeminiArgonHindsightGenerator is not None; "
+            "assert repro.HindsightEpisodeRecord is not None; "
+            "assert repro.RSISelfEvolutionEngine is not None; "
+            "assert repro.Insta360CaptureStatus is not None; "
+            "assert repro.Insta360SideViewBridge is not None; "
+            "assert repro.Real2SimSceneConfig is not None"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", check_code],
+            cwd=script_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        assert proc.returncode == 0, f"Script import failed: {proc.stderr}"
+
+    def test_uni_robot_agent_d1_fast_fail_error_paths(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from rsi.integrations.uni_robot_agent_d1 import (
+            UniRobotAgentD1Harness,
+            _ensure_uni_robot_agent_on_path,
+        )
+
+        _ensure_uni_robot_agent_on_path()
+        from uni_robot_agent.integrations.unitree_d1.environment.adapter import (
+            UnitreeD1EpisodeConfig,
+        )
+
+        cfg = UnitreeD1EpisodeConfig(
+            episode_id="ep-fast-fail",
+            task="pick_red_block_to_green_pad",
+            instruction="Pick red block",
+            backend="sim",
+        )
+        harness = UniRobotAgentD1Harness(cfg, tmp_path / "run_out")
+        try:
+            orig_call_tool = harness.call_tool
+
+            def fake_call_tool(
+                name: str, arguments: dict[str, object] | None = None
+            ) -> dict[str, object]:
+                res = orig_call_tool(name, arguments)
+                if name == "capture_scene":
+                    extra = dict(res["extra"])  # type: ignore[arg-type]
+                    extra["camera_calibration"] = {
+                        "overhead": {"image_path": str(tmp_path / "missing_ov.png")},
+                        "front": {"image_path": str(tmp_path / "missing_fr.png")},
+                    }
+                    res["extra"] = extra
+                return res
+
+            monkeypatch.setattr(harness, "call_tool", fake_call_tool)
+            with pytest.raises(FileNotFoundError, match="Failed to read camera images"):
+                harness.run_closed_loop_pick_and_place()
+
+            monkeypatch.undo()
+
+            class NullOutputResult:
+                status = "completed"
+                job_id = "job-null-01"
+                output = None
+
+            monkeypatch.setattr(
+                harness.executor, "call", lambda *_a, **_kw: NullOutputResult()
+            )
+            with pytest.raises(RuntimeError, match="returned no output"):
+                harness.call_tool("capture_scene", {})
+        finally:
+            harness.close()
+

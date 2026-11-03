@@ -5,6 +5,7 @@ import json
 import math
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,16 @@ from rsi.sim.d1_kinematics_dynamics import UnitreeD1PhysicsPlant
 
 if TYPE_CHECKING:
     from rsi.sim.real2sim_generator import Real2SimSceneConfig
+
+
+@dataclass(frozen=True)
+class OODPerturbationScenario:
+    name: str
+    p_pick: np.ndarray
+    p_apex: np.ndarray
+    p_place: np.ndarray
+    payload_kg: float
+    friction_scale: float
 
 
 class SimulationValidator:
@@ -306,32 +317,32 @@ class SimulationValidator:
           2) `ood_shifted_waypoints_15mm`: Pick/Place shifted by +12..-14mm in XY & +5mm in Z
           3) `ood_light_payload_0.15kg_high_friction`: 0.15 kg light load with 1.35x friction
         """
-        scenarios: list[dict[str, Any]] = [
-            {
-                "name": "ood_heavy_payload_0.48kg",
-                "p_pick": p_pick.copy(),
-                "p_apex": p_apex.copy(),
-                "p_place": p_place.copy(),
-                "payload_kg": 0.48,
-                "friction_scale": 1.0,
-            },
-            {
-                "name": "ood_shifted_waypoints_15mm",
-                "p_pick": p_pick + np.array([0.012, -0.010, 0.002], dtype=np.float64),
-                "p_apex": p_apex + np.array([-0.008, 0.010, 0.004], dtype=np.float64),
-                "p_place": p_place + np.array([-0.012, 0.014, 0.005], dtype=np.float64),
-                "payload_kg": 0.32,
-                "friction_scale": 1.0,
-            },
-            {
-                "name": "ood_light_payload_0.15kg_high_friction",
-                "p_pick": p_pick.copy(),
-                "p_apex": p_apex.copy(),
-                "p_place": p_place.copy(),
-                "payload_kg": 0.15,
-                "friction_scale": 1.35,
-            },
-        ]
+        scenarios: tuple[OODPerturbationScenario, ...] = (
+            OODPerturbationScenario(
+                name="ood_heavy_payload_0.48kg",
+                p_pick=p_pick.copy(),
+                p_apex=p_apex.copy(),
+                p_place=p_place.copy(),
+                payload_kg=0.48,
+                friction_scale=1.0,
+            ),
+            OODPerturbationScenario(
+                name="ood_shifted_waypoints_15mm",
+                p_pick=p_pick + np.array([0.012, -0.010, 0.002], dtype=np.float64),
+                p_apex=p_apex + np.array([-0.008, 0.010, 0.004], dtype=np.float64),
+                p_place=p_place + np.array([-0.012, 0.014, 0.005], dtype=np.float64),
+                payload_kg=0.32,
+                friction_scale=1.0,
+            ),
+            OODPerturbationScenario(
+                name="ood_light_payload_0.15kg_high_friction",
+                p_pick=p_pick.copy(),
+                p_apex=p_apex.copy(),
+                p_place=p_place.copy(),
+                payload_kg=0.15,
+                friction_scale=1.35,
+            ),
+        )
 
         rmses: list[float] = []
         scenario_scores: list[float] = []
@@ -345,8 +356,8 @@ class SimulationValidator:
         ood_plant = UnitreeD1PhysicsPlant(dt=dt_ood)
         base_coulomb = ood_plant.coulomb_friction.copy()
 
-        for sc in scenarios:
-            ood_plant.coulomb_friction = base_coulomb * float(sc["friction_scale"])
+        for scenario in scenarios:
+            ood_plant.coulomb_friction = base_coulomb * scenario.friction_scale
             q = q_init.copy()
             dq = np.zeros(6, dtype=np.float64)
             controller.reset(q)
@@ -360,10 +371,10 @@ class SimulationValidator:
                 x_ref, dx_ref, grip_cmd, load_kg, ext_f = self._reference_schedule(
                     t,
                     p_start,
-                    sc["p_pick"],
-                    sc["p_apex"],
-                    sc["p_place"],
-                    float(sc["payload_kg"]),
+                    scenario.p_pick,
+                    scenario.p_apex,
+                    scenario.p_place,
+                    scenario.payload_kg,
                 )
                 ee_pos, _ = ood_plant.forward_kinematics(q)
                 J_pos = ood_plant.compute_position_jacobian(q)
@@ -401,7 +412,7 @@ class SimulationValidator:
             scenario_scores.append(max(0.0, sc_score))
             scenario_details.append(
                 {
-                    "name": sc["name"],
+                    "name": scenario.name,
                     "rmse_m": round(sc_rmse, 5),
                     "violations": violations,
                     "passed": sc_ok,
@@ -429,13 +440,15 @@ class SimulationValidator:
         Generates smooth quintic minimum-jerk SE(3) reference position & velocity,
         gripper command, true payload mass (0.35 kg), and external perturbation force.
         """
-        def quintic_interp(p0: np.ndarray, p1: np.ndarray, t0: float, t1: float, cur_t: float):
+        def quintic_interp(
+            p0: np.ndarray, p1: np.ndarray, t0: float, t1: float, cur_t: float
+        ) -> tuple[np.ndarray, np.ndarray]:
             dur = max(1e-4, t1 - t0)
-            u = float(np.clip((cur_t - t0) / dur, 0.0, 1.0))
-            s = 10.0 * (u ** 3) - 15.0 * (u ** 4) + 6.0 * (u ** 5)
-            ds = (30.0 * (u ** 2) - 60.0 * (u ** 3) + 30.0 * (u ** 4)) / dur
-            pos = p0 + s * (p1 - p0)
-            vel = ds * (p1 - p0)
+            phase_u = float(np.clip((cur_t - t0) / dur, 0.0, 1.0))
+            blend_s = 10.0 * (phase_u**3) - 15.0 * (phase_u**4) + 6.0 * (phase_u**5)
+            blend_ds = (30.0 * (phase_u**2) - 60.0 * (phase_u**3) + 30.0 * (phase_u**4)) / dur
+            pos = p0 + blend_s * (p1 - p0)
+            vel = blend_ds * (p1 - p0)
             return pos, vel
 
         ext_force = np.zeros(3, dtype=np.float64)
@@ -443,24 +456,23 @@ class SimulationValidator:
             # Phase 0: Approach pick object
             pos, vel = quintic_interp(p_start, p_pick, 0.0, 1.10, t)
             return pos, vel, False, 0.0, ext_force
-        elif t < 1.40:
+        if t < 1.40:
             # Phase 1: Close gripper on payload block at p_pick
             return p_pick.copy(), np.zeros(3, dtype=np.float64), True, payload_mass_kg, ext_force
-        elif t < 2.30:
+        if t < 2.30:
             # Phase 2A: Lift payload to obstacle-clearing apex + external perturbation pulse
             pos, vel = quintic_interp(p_pick, p_apex, 1.40, 2.30, t)
             if 1.65 <= t <= 1.85:
                 ext_force = np.array([0.35, -0.25, -0.75], dtype=np.float64)
             return pos, vel, True, payload_mass_kg, ext_force
-        elif t < 3.40:
+        if t < 3.40:
             # Phase 2B: Transport from apex to placement target p_place
             pos, vel = quintic_interp(p_apex, p_place, 2.30, 3.40, t)
             return pos, vel, True, payload_mass_kg, ext_force
-        else:
-            # Phase 3: Hold at placement site for two-observation confirmation & release
-            return p_place.copy(), np.zeros(3, dtype=np.float64), True, 0.0, ext_force
+        # Phase 3: Hold at placement site for two-observation confirmation & release
+        return p_place.copy(), np.zeros(3, dtype=np.float64), True, 0.0, ext_force
 
-    def _load_controller_instance(self, candidate: ControlPolicyCandidate):
+    def _load_controller_instance(self, candidate: ControlPolicyCandidate) -> Any:
         if str(self.workspace_root) not in sys.path:
             sys.path.insert(0, str(self.workspace_root))
         spec = importlib.util.spec_from_file_location(
@@ -472,7 +484,7 @@ class SimulationValidator:
         spec.loader.exec_module(module)
         return module.UnitreeD1EvolvedController()
 
-    def _load_skill_module(self, skill_id: str):
+    def _load_skill_module(self, skill_id: str) -> Any:
         if str(self.workspace_root) not in sys.path:
             sys.path.insert(0, str(self.workspace_root))
         return importlib.import_module(f"skills_library.{skill_id}")

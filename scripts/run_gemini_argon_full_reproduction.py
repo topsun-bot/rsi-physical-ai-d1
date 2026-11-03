@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import math
@@ -42,7 +43,32 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+_LAZY_RSI_EXPORTS: dict[str, str] = {
+    "GeminiArgonPrimitiveExecutor": "rsi.control.argon_primitive_executor",
+    "SimRehearsedControlReport": "rsi.control.argon_primitive_executor",
+    "GeminiArgonHindsightGenerator": "rsi.data_gen.argon_hindsight_generator",
+    "HindsightEpisodeRecord": "rsi.data_gen.argon_hindsight_generator",
+    "RSISelfEvolutionEngine": "rsi.evolution.loop_engine",
+    "Insta360CaptureStatus": "rsi.sim.insta360_perception_bridge",
+    "Insta360SideViewBridge": "rsi.sim.insta360_perception_bridge",
+    "Real2SimSceneConfig": "rsi.sim.real2sim_generator",
+}
+
 logger = logging.getLogger(__name__)
+
+
+def __getattr__(attribute_name: str) -> Any:
+    target_module_path = _LAZY_RSI_EXPORTS.get(attribute_name)
+    if target_module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {attribute_name!r}")
+    module = importlib.import_module(target_module_path)
+    resolved_attr = getattr(module, attribute_name)
+    globals()[attribute_name] = resolved_attr
+    return resolved_attr
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_LAZY_RSI_EXPORTS))
 
 
 @dataclass(frozen=True)

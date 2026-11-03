@@ -374,7 +374,10 @@ class UniRobotAgentD1Harness:
         res = self.executor.call(name, arguments or {})
         if res.status == "accepted" and res.job_id is not None:
             res = self.executor.job_result(res.job_id, timeout=30.0)
-        assert res.output is not None
+        if res.output is None:
+            raise RuntimeError(
+                f"Tool {name!r} returned no output (status={res.status!r}, job_id={res.job_id!r})"
+            )
         return {
             "success": res.output.success,
             "error": res.output.error,
