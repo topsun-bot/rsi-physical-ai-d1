@@ -1,4 +1,7 @@
 {
+  "operation_id": "i360cap-710fa8830821",
+  "capture_state": "VERIFIED_LIVE",
+  "elapsed_ms": 4829.82,
   "camera_host": "28163@10.10.137.106",
   "proxy_jump": "dgx-spark",
   "camera_model": "Insta360 X4 Air",
@@ -11,17 +14,17 @@
   ],
   "fps": 30.0,
   "status_meta": {
-    "frames": 2098,
-    "packets": 2111,
-    "lastTimestamp": 280576464,
-    "lastFrameAgeMs": 16,
+    "state": "streaming",
+    "frames": 35727,
+    "packets": 36244,
+    "lastFrameAgeMs": 15,
     "running": true
   },
   "status": {
-    "frames": 2098,
-    "packets": 2111,
-    "lastTimestamp": 280576464,
-    "lastFrameAgeMs": 16,
+    "state": "streaming",
+    "frames": 35727,
+    "packets": 36244,
+    "lastFrameAgeMs": 15,
     "running": true
   },
   "workbench_centered_360_path": "/Users/zhang/Documents/RSI/runs/insta360_multiview/insta360_workbench_centered_360.jpg",
@@ -371,5 +374,6 @@
         "distance_m": 3.1
       }
     }
-  ]
+  ],
+  "diagnostic_errors": []
 }

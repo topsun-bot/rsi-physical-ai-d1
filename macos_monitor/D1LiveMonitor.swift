@@ -2,6 +2,186 @@ import Cocoa
 import Darwin
 import Foundation
 
+// MARK: - Structured Trace Logging, Safe IO & Typed Telemetry Models
+
+enum TraceLogger {
+    static func makeOperationId(prefix: String = "mon") -> String {
+        let rawUuid = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        return "\(prefix)-\(rawUuid.prefix(12))"
+    }
+
+    static func warn(operationId: String, component: String, message: String, error: Error? = nil) {
+        let errorSuffix = error.map { " | error=\($0.localizedDescription)" } ?? ""
+        fputs("[D1LiveMonitor][WARN][op=\(operationId)][\(component)] \(message)\(errorSuffix)\n", stderr)
+    }
+}
+
+enum FileIO {
+    @discardableResult
+    static func ensureDirectory(_ url: URL, operationId: String, context: String) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return true
+        } catch {
+            TraceLogger.warn(
+                operationId: operationId,
+                component: "FileIO",
+                message: "createDirectory failed (\(context)): \(url.path)",
+                error: error
+            )
+            return false
+        }
+    }
+
+    @discardableResult
+    static func writeData(
+        _ payloadBytes: Data,
+        to url: URL,
+        operationId: String,
+        context: String
+    ) -> Bool {
+        do {
+            try payloadBytes.write(to: url, options: .atomic)
+            return true
+        } catch {
+            TraceLogger.warn(
+                operationId: operationId,
+                component: "FileIO",
+                message: "writeData failed (\(context)): \(url.path)",
+                error: error
+            )
+            return false
+        }
+    }
+
+    static func loadImage(from url: URL, operationId: String, context: String) -> NSImage? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        do {
+            let rawBytes = try Data(contentsOf: url)
+            return NSImage(data: rawBytes)
+        } catch {
+            TraceLogger.warn(
+                operationId: operationId,
+                component: "FileIO",
+                message: "loadImage failed (\(context)): \(url.path)",
+                error: error
+            )
+            return nil
+        }
+    }
+}
+
+struct HubStatusPayload: Decodable, Equatable {
+    let continuous_mode: Bool?
+    let cycle_count: Int?
+    let current_skill: String?
+    let current_phase: String?
+}
+
+struct HubControlCommand: Encodable, Equatable {
+    let endpointPath: String
+    let operation_id: String
+    let skill: String?
+    let enable: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case operation_id
+        case skill
+        case enable
+    }
+
+    static func triggerSkill(_ skillName: String, operationId: String = TraceLogger.makeOperationId(prefix: "cmd")) -> HubControlCommand {
+        HubControlCommand(endpointPath: "/api/skill", operation_id: operationId, skill: skillName, enable: nil)
+    }
+
+    static func setContinuous(_ enabled: Bool, operationId: String = TraceLogger.makeOperationId(prefix: "cmd")) -> HubControlCommand {
+        HubControlCommand(endpointPath: "/api/continuous", operation_id: operationId, skill: nil, enable: enabled)
+    }
+
+    static func safeHome(operationId: String = TraceLogger.makeOperationId(prefix: "cmd")) -> HubControlCommand {
+        HubControlCommand(endpointPath: "/api/home", operation_id: operationId, skill: nil, enable: nil)
+    }
+}
+
+struct Insta360SceneGraphSnapshot: Equatable {
+    let online: Bool
+    let frames: Int
+    let ageMs: Int
+    let zClearanceMm: Double
+}
+
+struct Insta360SceneGraphParser {
+    private struct RawStatusMeta: Decodable {
+        let running: Bool?
+        let frames: Int?
+        let lastFrameAgeMs: Int?
+    }
+
+    private struct RawEntity: Decodable {
+        let entity_id: String?
+        let id: String?
+        let z_clearance_mm: Double?
+
+        var resolvedId: String { entity_id ?? id ?? "" }
+    }
+
+    private struct RawDocument: Decodable {
+        let status_meta: RawStatusMeta?
+        let status: RawStatusMeta?
+        let surrounding_entities: [RawEntity]?
+        let surround_entities_3d: [RawEntity]?
+    }
+
+    static func normalizeAgeMs(_ rawAgeMs: Int?, fallback: Int = 15) -> Int {
+        guard let rawAgeMs else { return fallback }
+        return rawAgeMs <= 0 ? fallback : max(1, rawAgeMs)
+    }
+
+    static func parse(
+        jsonData: Data,
+        defaultOnline: Bool,
+        operationId: String
+    ) -> Insta360SceneGraphSnapshot {
+        let decoder = JSONDecoder()
+        let document: RawDocument
+        do {
+            document = try decoder.decode(RawDocument.self, from: jsonData)
+        } catch {
+            TraceLogger.warn(
+                operationId: operationId,
+                component: "Insta360SceneGraphParser",
+                message: "Failed to decode insta360_surround_scene_graph.json",
+                error: error
+            )
+            return Insta360SceneGraphSnapshot(
+                online: defaultOnline,
+                frames: 42665,
+                ageMs: 15,
+                zClearanceMm: 86.5
+            )
+        }
+
+        let statusMeta = document.status_meta ?? document.status
+        let online = statusMeta?.running ?? defaultOnline
+        let rawFrames = statusMeta?.frames ?? 0
+        let frames = rawFrames > 0 ? rawFrames : 42665
+        let ageMs = normalizeAgeMs(statusMeta?.lastFrameAgeMs, fallback: 15)
+
+        let entities = document.surrounding_entities ?? document.surround_entities_3d ?? []
+        let matchedLeftArm = entities.first {
+            $0.resolvedId == "unitree_d1_arm_1_left" || $0.resolvedId == "d1_arm1_left"
+        }
+        let zClearanceMm = matchedLeftArm?.z_clearance_mm ?? 86.5
+
+        return Insta360SceneGraphSnapshot(
+            online: online,
+            frames: frames,
+            ageMs: ageMs,
+            zClearanceMm: zClearanceMm
+        )
+    }
+}
+
 // MARK: - Models & Config
 
 struct ArmTelemetry {
@@ -507,11 +687,20 @@ private func loadLocalStreamConfig(_ key: String, fallback: String) -> String {
     if let v = ProcessInfo.processInfo.environment[key], !v.isEmpty { return v }
     let cfgFile = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/d1_clothesline/\(key)")
-    if let s = try? String(contentsOf: cfgFile, encoding: .utf8)
-        .trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
-        return s
+    guard FileManager.default.fileExists(atPath: cfgFile.path) else { return fallback }
+    do {
+        let content = try String(contentsOf: cfgFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return content.isEmpty ? fallback : content
+    } catch {
+        TraceLogger.warn(
+            operationId: TraceLogger.makeOperationId(prefix: "cfg"),
+            component: "StreamConfig",
+            message: "Failed reading \(cfgFile.path)",
+            error: error
+        )
+        return fallback
     }
-    return fallback
 }
 
 final class LiveStreamController {
@@ -659,11 +848,12 @@ final class LiveStreamController {
 
     private func runInsta360BridgeCapture() {
         guard FileManager.default.isExecutableFile(atPath: pythonBin) else { return }
+        let operationId = TraceLogger.makeOperationId(prefix: "i360cap")
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: pythonBin)
         proc.arguments = [
             "-c",
-            "from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge; Insta360SideViewBridge('/Users/zhang/Documents/RSI').probe_and_capture_frame()"
+            "from rsi.sim.insta360_perception_bridge import Insta360SideViewBridge; Insta360SideViewBridge('/Users/zhang/Documents/RSI').probe_and_capture_frame(operation_id='\(operationId)')"
         ]
         proc.currentDirectoryURL = URL(fileURLWithPath: "/Users/zhang/Documents/RSI")
         proc.standardOutput = FileHandle.nullDevice
@@ -675,42 +865,50 @@ final class LiveStreamController {
                 Thread.sleep(forTimeInterval: 0.15)
             }
             if proc.isRunning { proc.terminate() }
-        } catch {}
+        } catch {
+            TraceLogger.warn(
+                operationId: operationId,
+                component: "LiveStreamController",
+                message: "Failed launching python Insta360SideViewBridge subprocess",
+                error: error
+            )
+        }
     }
 
     private func reloadInsta360LocalFiles() {
+        let operationId = TraceLogger.makeOperationId(prefix: "i360load")
         let panoURL = insta360Dir.appendingPathComponent("insta360_workbench_centered_360.jpg")
         let rectURL = insta360Dir.appendingPathComponent("insta360_rectilinear_d1_workbench.jpg")
         let hudURL = insta360Dir.appendingPathComponent("insta360_360_surround_hud.png")
 
-        let panoImg = (try? Data(contentsOf: panoURL)).flatMap { NSImage(data: $0) }
-        let rectImg = (try? Data(contentsOf: rectURL)).flatMap { NSImage(data: $0) }
-        let hudImg = (try? Data(contentsOf: hudURL)).flatMap { NSImage(data: $0) }
+        let panoImg = FileIO.loadImage(from: panoURL, operationId: operationId, context: "pano")
+        let rectImg = FileIO.loadImage(from: rectURL, operationId: operationId, context: "rect_workbench")
+        let hudImg = FileIO.loadImage(from: hudURL, operationId: operationId, context: "surround_hud")
 
-        var online = (panoImg != nil || rectImg != nil)
-        var frames = 42665
-        var ageMs = 15
-        var zClearance = 86.5
+        let defaultOnline = (panoImg != nil || rectImg != nil)
+        var parsedSnapshot = Insta360SceneGraphSnapshot(
+            online: defaultOnline,
+            frames: 42665,
+            ageMs: 15,
+            zClearanceMm: 86.5
+        )
 
         let graphURL = insta360Dir.appendingPathComponent("insta360_surround_scene_graph.json")
-        if let data = try? Data(contentsOf: graphURL),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            let st = (obj["status_meta"] as? [String: Any]) ?? (obj["status"] as? [String: Any])
-            if let st {
-                if let f = st["frames"] as? Int, f > 0 { frames = f }
-                if let a = st["lastFrameAgeMs"] as? Int { ageMs = max(1, a <= 0 ? 15 : a) }
-                if let r = st["running"] as? Bool { online = r }
-            }
-            let entities = (obj["surrounding_entities"] as? [[String: Any]])
-                ?? (obj["surround_entities_3d"] as? [[String: Any]])
-            if let entities {
-                for ent in entities {
-                    let id = (ent["entity_id"] as? String) ?? (ent["id"] as? String) ?? ""
-                    if (id == "unitree_d1_arm_1_left" || id == "d1_arm1_left"),
-                       let z = ent["z_clearance_mm"] as? Double {
-                        zClearance = z
-                    }
-                }
+        if FileManager.default.fileExists(atPath: graphURL.path) {
+            do {
+                let rawGraphData = try Data(contentsOf: graphURL)
+                parsedSnapshot = Insta360SceneGraphParser.parse(
+                    jsonData: rawGraphData,
+                    defaultOnline: defaultOnline,
+                    operationId: operationId
+                )
+            } catch {
+                TraceLogger.warn(
+                    operationId: operationId,
+                    component: "LiveStreamController",
+                    message: "Failed reading \(graphURL.path)",
+                    error: error
+                )
             }
         }
 
@@ -718,10 +916,10 @@ final class LiveStreamController {
         if let p = panoImg { state.insta360PanoImage = p }
         if let r = rectImg { state.insta360RectImage = r }
         if let h = hudImg { state.insta360HUDImage = h }
-        state.insta360Online = online
-        state.insta360Frames = frames
-        state.insta360AgeMs = ageMs
-        state.insta360ZClearanceMm = zClearance
+        state.insta360Online = parsedSnapshot.online
+        state.insta360Frames = parsedSnapshot.frames
+        state.insta360AgeMs = parsedSnapshot.ageMs
+        state.insta360ZClearanceMm = parsedSnapshot.zClearanceMm
         state.lock.unlock()
     }
 
@@ -743,15 +941,23 @@ final class LiveStreamController {
             if currentMode != .hubHTTP { break }
 
             let sem = DispatchSemaphore(value: 0)
-            let task = session.dataTask(with: snapURL) { [weak self] data, resp, err in
+            let task = session.dataTask(with: snapURL) { [weak self] responseBytes, resp, err in
                 defer { sem.signal() }
+                if let err {
+                    TraceLogger.warn(
+                        operationId: TraceLogger.makeOperationId(prefix: "hubsnap"),
+                        component: "LiveStreamController",
+                        message: "Hub snapshot request failed",
+                        error: err
+                    )
+                    return
+                }
                 guard let self = self,
-                      err == nil,
                       let http = resp as? HTTPURLResponse,
                       http.statusCode == 200,
-                      let data = data,
-                      data.count > 2000,
-                      let img = NSImage(data: data) else {
+                      let responseBytes = responseBytes,
+                      responseBytes.count > 2000,
+                      let img = NSImage(data: responseBytes) else {
                     return
                 }
                 self.deliverFrame(img)
@@ -763,6 +969,7 @@ final class LiveStreamController {
     }
 
     private func runFFmpegMJPEGPipe(rtspURL: String, isHD: Bool) {
+        let operationId = TraceLogger.makeOperationId(prefix: "rtsp")
         let ffmpegBin = resolveFFmpegPath()
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: ffmpegBin)
@@ -792,7 +999,18 @@ final class LiveStreamController {
         proc.standardOutput = outPipe
         proc.standardError = FileHandle.nullDevice
         let handle = outPipe.fileHandleForReading
-        defer { try? handle.close() }
+        defer {
+            do {
+                try handle.close()
+            } catch {
+                TraceLogger.warn(
+                    operationId: operationId,
+                    component: "LiveStreamController",
+                    message: "Closing ffmpeg stdout pipe failed",
+                    error: error
+                )
+            }
+        }
 
         processLock.lock()
         ffmpegProcess = proc
@@ -807,6 +1025,12 @@ final class LiveStreamController {
         do {
             try proc.run()
         } catch {
+            TraceLogger.warn(
+                operationId: operationId,
+                component: "LiveStreamController",
+                message: "Failed launching ffmpeg process",
+                error: error
+            )
             state.lock.lock()
             state.streamConnected = false
             state.streamStatusText = "启动 ffmpeg 失败: \(error.localizedDescription)"
@@ -826,7 +1050,7 @@ final class LiveStreamController {
             }
             buffer.append(chunk)
 
-            // Extract all complete JPEG frames in buffer, render the freshest one
+            // 丢弃堆积旧帧仅渲染最新完整帧
             var latestJPEG: Data?
             while true {
                 guard let soiRange = buffer.range(of: soiMarker) else {
@@ -881,10 +1105,10 @@ final class LiveStreamController {
         let session = URLSession(configuration: sessionCfg)
         defer { session.finishTasksAndInvalidate() }
         let statusURL = URL(string: "\(hubBaseURL)/api/status")
+        let decoder = JSONDecoder()
 
         var tick = 0
         while isRunning {
-            // 1. Direct UDP query to 10.10.137.101..103:19001
             for key in ["left_103", "center_102", "right_101"] {
                 state.lock.lock()
                 let ip = state.arms[key]?.ip ?? ""
@@ -901,20 +1125,31 @@ final class LiveStreamController {
                 }
             }
 
-            // 2. Every 3 ticks (~0.9s), sync skill/phase from 4gpu:8899 if reachable
+            // 降频轮询远端中控降低开销
             if tick % 3 == 0, let url = statusURL {
-                let task = session.dataTask(with: url) { [weak self] data, _, err in
+                let task = session.dataTask(with: url) { [weak self] payloadData, _, err in
                     guard let self = self,
                           err == nil,
-                          let data = data,
-                          let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                          let payloadData = payloadData else {
+                        return
+                    }
+                    let decoded: HubStatusPayload
+                    do {
+                        decoded = try decoder.decode(HubStatusPayload.self, from: payloadData)
+                    } catch {
+                        TraceLogger.warn(
+                            operationId: TraceLogger.makeOperationId(prefix: "hub"),
+                            component: "LiveStreamController",
+                            message: "Failed decoding \(url.absoluteString)",
+                            error: error
+                        )
                         return
                     }
                     self.state.lock.lock()
-                    if let cont = obj["continuous_mode"] as? Bool { self.state.continuousMode = cont }
-                    if let cyc = obj["cycle_count"] as? Int { self.state.cycleCount = cyc }
-                    if let sk = obj["current_skill"] as? String { self.state.currentSkill = sk }
-                    if let ph = obj["current_phase"] as? String { self.state.currentPhase = ph }
+                    if let cont = decoded.continuous_mode { self.state.continuousMode = cont }
+                    if let cyc = decoded.cycle_count { self.state.cycleCount = cyc }
+                    if let sk = decoded.current_skill { self.state.currentSkill = sk }
+                    if let ph = decoded.current_phase { self.state.currentPhase = ph }
                     self.state.lock.unlock()
                 }
                 task.resume()
@@ -970,14 +1205,56 @@ final class LiveStreamController {
         return vals
     }
 
-    func sendHubPOST(path: String, payload: [String: Any]) {
-        guard let url = URL(string: "\(hubBaseURL)\(path)"),
-              let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+    func sendHubCommand(_ command: HubControlCommand) {
+        let opId = command.operation_id
+        guard let url = URL(string: "\(hubBaseURL)\(command.endpointPath)") else {
+            TraceLogger.warn(
+                operationId: opId,
+                component: "HubControl",
+                message: "Invalid Hub URL: \(hubBaseURL)\(command.endpointPath)"
+            )
+            return
+        }
+        let bodyData: Data
+        do {
+            bodyData = try JSONEncoder().encode(command)
+        } catch {
+            TraceLogger.warn(
+                operationId: opId,
+                component: "HubControl",
+                message: "Failed encoding HubControlCommand for \(command.endpointPath)",
+                error: error
+            )
+            return
+        }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = body
-        URLSession.shared.dataTask(with: req).resume()
+        req.setValue(opId, forHTTPHeaderField: "X-Operation-ID")
+        req.httpBody = bodyData
+        URLSession.shared.dataTask(with: req) { [weak self] _, response, error in
+            if let error {
+                TraceLogger.warn(
+                    operationId: opId,
+                    component: "HubControl",
+                    message: "POST \(command.endpointPath) failed",
+                    error: error
+                )
+                return
+            }
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                TraceLogger.warn(
+                    operationId: opId,
+                    component: "HubControl",
+                    message: "POST \(command.endpointPath) returned HTTP \(http.statusCode)"
+                )
+                return
+            }
+            guard let self else { return }
+            DispatchQueue.main.async {
+                self.onFrameUpdate()
+            }
+        }.resume()
     }
 }
 
@@ -1045,6 +1322,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installSignalHandlers() {
+        for ttySig in [SIGTTIN, SIGTTOU, SIGTSTP] {
+            signal(ttySig, SIG_IGN)
+        }
         for sig in [SIGTERM, SIGINT, SIGHUP] {
             signal(sig, SIG_IGN)
             let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
@@ -1337,19 +1617,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func triggerGraspAndPlug() {
-        streamController.sendHubPOST(path: "/api/skill", payload: ["skill": "grasp_and_plug_loop"])
+        streamController.sendHubCommand(.triggerSkill("grasp_and_plug_loop"))
     }
 
     @objc func enableContinuousWork() {
-        streamController.sendHubPOST(path: "/api/continuous", payload: ["enable": true])
+        streamController.sendHubCommand(.setContinuous(true))
     }
 
     @objc func disableContinuousWork() {
-        streamController.sendHubPOST(path: "/api/continuous", payload: ["enable": false])
+        streamController.sendHubCommand(.setContinuous(false))
     }
 
     @objc func triggerSafeHome() {
-        streamController.sendHubPOST(path: "/api/home", payload: [:])
+        streamController.sendHubCommand(.safeHome())
     }
 
     func exportLatestVerificationSnapshot() {
@@ -1357,10 +1637,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let bitmap = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) else { return }
         contentView.cacheDisplay(in: contentView.bounds, to: bitmap)
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else { return }
+        let opId = TraceLogger.makeOperationId(prefix: "snap")
         let outDir = URL(fileURLWithPath: "/Users/zhang/Documents/RSI/runs/snapshots")
-        try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        FileIO.ensureDirectory(outDir, operationId: opId, context: "exportLatestVerificationSnapshot")
         let outFile = outDir.appendingPathComponent("d1_mac_monitor_latest.png")
-        try? pngData.write(to: outFile)
+        FileIO.writeData(pngData, to: outFile, operationId: opId, context: "exportLatestVerificationSnapshot")
     }
 
     @objc func saveSnapshot() {
@@ -1368,11 +1649,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         videoView.cacheDisplay(in: videoView.bounds, to: bitmap)
         guard let pngData = bitmap.representation(using: .png, properties: [:]) else { return }
 
+        let opId = TraceLogger.makeOperationId(prefix: "snap")
         let ts = MonitorDateFormatters.fileStamp.string(from: Date())
         let outDir = URL(fileURLWithPath: "/Users/zhang/Documents/RSI/runs/snapshots")
-        try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        FileIO.ensureDirectory(outDir, operationId: opId, context: "saveSnapshot")
         let outFile = outDir.appendingPathComponent("d1_monitor_\(ts).png")
-        try? pngData.write(to: outFile)
+        FileIO.writeData(pngData, to: outFile, operationId: opId, context: "saveSnapshot")
 
         state.lock.lock()
         state.currentPhase = "📸 已保存截图: runs/snapshots/d1_monitor_\(ts).png"
@@ -1385,6 +1667,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(url)
         }
     }
+}
+
+// MARK: - Automated Self-Test
+
+func runSelfTests() -> Int32 {
+    var failures: [String] = []
+    func check(_ condition: @autoclosure () -> Bool, _ msg: String) {
+        if !condition() {
+            failures.append(msg)
+            fputs("❌ FAIL: \(msg)\n", stderr)
+        } else {
+            print("✅ PASS: \(msg)")
+        }
+    }
+
+    let validGraphJson = """
+    {
+      "status_meta": {"running": true, "frames": 54321, "lastFrameAgeMs": 0},
+      "surround_entities_3d": [
+        {"id": "d1_arm1_left", "z_clearance_mm": 88.4}
+      ]
+    }
+    """.data(using: .utf8)!
+    let parsed = Insta360SceneGraphParser.parse(jsonData: validGraphJson, defaultOnline: false, operationId: "mon-test-1")
+    check(
+        parsed == Insta360SceneGraphSnapshot(online: true, frames: 54321, ageMs: 15, zClearanceMm: 88.4),
+        "Insta360SceneGraphParser decodes surround_entities_3d and normalizes zero ageMs to 15"
+    )
+
+    let command = HubControlCommand.triggerSkill("grasp_and_plug_loop", operationId: "cmd-fixed123")
+    let encodedString: String
+    do {
+        let encodedCommandData = try JSONEncoder().encode(command)
+        encodedString = String(data: encodedCommandData, encoding: .utf8) ?? ""
+    } catch {
+        encodedString = ""
+    }
+    check(
+        command.endpointPath == "/api/skill"
+            && encodedString.contains("\"operation_id\":\"cmd-fixed123\"")
+            && encodedString.contains("\"skill\":\"grasp_and_plug_loop\""),
+        "HubControlCommand encodes operation_id and skill payload cleanly"
+    )
+
+    print("Self-test summary: \(failures.isEmpty ? "ALL PASSED" : "\(failures.count) FAILED")")
+    return failures.isEmpty ? 0 : 1
+}
+
+if CommandLine.arguments.contains("--self-test") {
+    exit(runSelfTests())
 }
 
 // MARK: - Main Entry

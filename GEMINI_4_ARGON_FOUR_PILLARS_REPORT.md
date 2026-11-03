@@ -15,7 +15,7 @@
 | **相机型号与序列号** | `Insta360 X4 Air (360° Equirectangular + Gnomonic Rectilinear Multi-View)` (`USB\VID_2E1A&PID_0002\IAFEA2510H4E6N`) |
 | **SDK 与固件版本** | Insta360 CameraSDK `2.1.8` + MediaSDK `3.1.5` (FW `v1.2.7_build1`) |
 | **实时全景流规格** | `1920x960@30fps (FlowState Stitched Equirectangular)` |
-| **捕获帧计数 / 帧延迟** | `#2098` 帧 / `16 ms` |
+| **捕获帧计数 / 帧延迟** | `#1744943` 帧 / `31 ms` |
 
 ### 0.2 球心切平面针孔反投影 (Gnomonic Rectilinear Pinhole Projection) 四大无畸变视图
 通过对双鱼眼等距柱状全景图 $I(\lambda, \varphi)$ 执行球心切平面反投影，彻底消除鱼眼桶形畸变，恢复工作台边缘与机械臂连杆的真实几何直线度：
@@ -56,9 +56,9 @@
 
 ### 支柱 4：多轮物理根因诊断与控制代码自进化闭环 (`rsi/coder/controller_synthesizer.py`)
 - **三代控制律进化**：
-  - **Gen-0（基线）**：`kp=20.0, payload_gamma=0.0`，因 `0.35 kg` 负载下垂导致仿真 RMSE = **`19.86 mm`**，被安全门禁自动拦截。
+  - **Gen-0（基线）**：`kp=20.0, payload_gamma=0.0`，因 `0.35 kg` 负载下垂导致仿真 RMSE = **`19.64 mm`**，被安全门禁自动拦截。
   - **Gen-1（一阶进化）**：自动合成在线负载观测器 `payload_gamma=1.50` 与 `kp=43.5`，RMSE 骤降至 **`3.11 mm`**（降幅 `-84.2%`），安全门禁放行。
-  - **Gen-2（二阶最优）**：进一步收敛至仿真 RMSE = **`2.62 mm`**、数字孪生真机 RMSE = **`4.63 mm`**，综合评分达 **`94.93 / 100`**。
+  - **Gen-2（二阶最优）**：进一步收敛至仿真 RMSE = **`3.02 mm`**、数字孪生真机 RMSE = **`5.02 mm`**，综合评分达 **`94.6 / 100`**。
 
 ---
 

@@ -10,8 +10,18 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_BUNDLE="${REPO_ROOT}/D1LiveMonitor.app"
 PROC_PATTERN="D1LiveMonitor.app/Contents/MacOS/D1LiveMonitor"
 
-if [[ "${1:-}" == "--stop" ]]; then
+terminate_existing_monitor() {
+    pkill -CONT -f "${PROC_PATTERN}" >/dev/null 2>&1 || true
     if pkill -f "${PROC_PATTERN}" >/dev/null 2>&1; then
+        sleep 0.25
+        pkill -9 -f "${PROC_PATTERN}" >/dev/null 2>&1 || true
+        return 0
+    fi
+    return 1
+}
+
+if [[ "${1:-}" == "--stop" ]]; then
+    if terminate_existing_monitor; then
         echo "✅ 已退出 D1 实时监控浮窗"
     else
         echo "ℹ️  D1 实时监控浮窗没有在运行"
@@ -30,8 +40,8 @@ if [[ "${1:-}" == "--rollback" ]]; then
         macos_monitor/build_app.sh
     "${REPO_ROOT}/macos_clothesline/build_app.sh"
     "${REPO_ROOT}/macos_monitor/build_app.sh"
-    pkill -f "${PROC_PATTERN}" >/dev/null 2>&1 || true
-    sleep 0.3
+    terminate_existing_monitor || true
+    sleep 0.2
     if ! open -a "${APP_BUNDLE}" >/dev/null 2>&1; then
         nohup "${APP_BUNDLE}/Contents/MacOS/D1LiveMonitor" >/dev/null 2>&1 &
         disown || true
@@ -47,8 +57,8 @@ if [[ $REBUILD -eq 1 ]] || [[ ! -x "${APP_BUNDLE}/Contents/MacOS/D1LiveMonitor" 
 fi
 
 # Stop any previous instance cleanly
-pkill -f "${PROC_PATTERN}" >/dev/null 2>&1 || true
-sleep 0.6
+terminate_existing_monitor || true
+sleep 0.3
 
 if ! open -n -a "${APP_BUNDLE}" --args "$@" >/dev/null 2>&1; then
     nohup "${APP_BUNDLE}/Contents/MacOS/D1LiveMonitor" "$@" >/dev/null 2>&1 &
